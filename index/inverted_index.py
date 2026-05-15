@@ -3,10 +3,11 @@ import numpy as np
 
 class Index:
     def __init__(self):
-       self.index = {}
-       self.dictionary = {}
-    #    self.doc_ids = 0
-       self.num_docs = 0
+        self.index = {}
+        self.dictionary = {}
+        # self.doc_ids = 0
+        self.num_docs = 0
+        self.compression_method = None
 
     def build_index(self, dataset, my_tokenizer, d_gap=False , max_num_docs=1001):
         if d_gap:
@@ -94,10 +95,56 @@ class Index:
         pass
 
     def load_index(self, file_path):
+        # while reading it i should also read the compression method used, if any, and set self.compression_method accordingly
         pass
 
-    def compress_index(self):
+    def compress_index(self, method="gamma"):
+        if self.index is None or len(self.index) == 0:
+            raise ValueError("Inverted index is empty. Build the index before applying compression.")
+
+        methods_map = {
+            "gamma": self.__gamma_encode,
+            "delta": self.__delta_encode,
+            "varbyte": self.__varbyte_encode
+        }
+
+        if method in methods_map:
+            self.compression_method = method
+            self.__general_compressor(methods_map[method])
+        else:
+            raise ValueError(f"Compression method '{method}' is not supported. Allowed methods: {list(methods_map.keys())}")
+    
+    def __general_compressor(self, compression_func):
+        for term, posting_list in self.index.items():
+            compressed_postings = []
+            for doc_id, tf in posting_list:
+                # Gamma encode doc_id and tf
+                compressed_doc_id = compression_func(doc_id)
+                compressed_tf = compression_func(tf)
+                compressed_postings.append((compressed_doc_id, compressed_tf))
+            self.index[term] = compressed_postings
+
+    def __gamma_encode(self, number):
+        bin_num = bin(number)
         pass
+
+    def __delta_encode(self, number):
+        pass
+
+    def __varbyte_encode(self, number):
+        bin_num = bin(number)[2:] # remove '0b' prefix
+        print(f"Encoding number: {number}, Binary representation: {bin_num}")
+
+        cl = ((len(bin_num) + 6) // 7) * 7
+        bin_num = bin_num.zfill(cl)  # Pad with leading zeros to make its length a multiple of 8
+        spits = [bin_num[i:i+7] for i in range(0, len(bin_num), 7)]
+        print(f"Number: {number}, Binary: {bin_num}, Spits: {spits}")
+        last_byte = '0' + spits[-1]
+        other_bytes = ['1' + s for s in spits[:-1]]
+        print(f"Last byte: {last_byte}, Other bytes: {other_bytes}")
+        res = ''.join(other_bytes + [last_byte])
+        return res
+
 
     def decompress_index(self):
         pass
