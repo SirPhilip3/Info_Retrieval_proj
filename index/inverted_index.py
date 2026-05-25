@@ -234,6 +234,33 @@ class Index:
 
         # return com_string
 
+    def pfor_delta_encode(self, d_gaps, k=4): #! compression given the full d-gap list returns the compressed d-gap list and the outliers
+        min_ = min(d_gaps)
+
+        outliers = []
+
+        for i in range(len(d_gaps)):
+            var = d_gaps[i] - min_
+            if var >= 2**k-1:
+                outliers.append(bin(var)[2:])
+                d_gaps[i] = "1"*k
+            else:
+                d_gaps[i] = bin(var)[2:].zfill(k)
+        
+        # print(f"PForDelta encoding: D-gaps: {d_gaps}, Outliers: {outliers}")
+        return d_gaps, outliers, min_
+
+    def pfor_delta_decode(self, d_gap_array, outliers, min, k=4):
+        decoded = []
+        outlier_index = 0
+        for d_gap in d_gap_array:
+            if d_gap == "1"*k:
+                decoded.append(int(outliers[outlier_index], 2) + min)
+                outlier_index += 1
+            else:
+                decoded.append(int(d_gap, 2) + min)
+        
+        return decoded
 
     def decompress_index(self):
         pass
