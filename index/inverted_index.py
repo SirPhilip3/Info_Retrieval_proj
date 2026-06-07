@@ -1,5 +1,26 @@
 from .documents import tokenizer
 import numpy as np
+from bitarray import bitarray
+from bitarray.util import ba2int, int2ba
+
+import struct
+
+COMPRESSION_CODES = {
+    None: 0,
+    "gamma": 1,
+    "delta": 2,
+    "varbyte": 3,
+}
+
+COMPRESSION_METHODS = {
+    0: None,
+    1: "gamma",
+    2: "delta",
+    3: "varbyte",
+}
+
+MAX_UINT32 = 2**32 - 1
+
 
 class Index:
     def __init__(self):
@@ -94,21 +115,112 @@ class Index:
     
     def remove_tf(self):
         """Remove term frequencies from the index, leaving only document IDs."""
+        if self.removed_tf:
+            raise ValueError("Term frequencies have already been removed from the index.")
+
         for term, posting_list in self.index.items():
             self.index[term] = [doc_id for doc_id, _tf in posting_list]
         
         self.removed_tf = True
 
-    def save_index(self, file_path):
-        pass
+
+
+    def build_header(self):
+        compression_code = COMPRESSION_CODES[self.compression_method]
+        header = struct.pack('<IB', compression_code, self.removed_tf)
+        return header
+        
+
+    def save_index(self, file_path): #! temporary just save the postings not the terms 
+        if self.compression_method != 'gamma':
+            raise ValueError("Compression method is not set. Apply compression before saving the index. Only 'gamma' compression is currently supported for saving.")
+        
+        header = self.build_header()
+        
+        with open(file_path, 'wb') as f:
+            f.write(header)
+            if self.removed_tf:
+                for term, posting_list in self.index.items():
+                    l = len(posting_list)
+                    
+                    if l > MAX_UINT32:
+                        raise ValueError(f"Posting list for term '{term}' exceeds maximum length of {MAX_UINT32}. Cannot save index.")
+                    
+                    f.write(struct.pack('<I', l))  #! write the length of the posting list maybe to optimize the loading phase
+
+                    for doc_id in posting_list:
+                        f.write(doc_id.tobytes())
+                    # f.write(b'\x00')  # separator between posting lists            
+            else :
+                raise NotImplementedError("Saving index with term frequencies is not implemented yet.")
+                
 
     def load_index(self, file_path):
-        # while reading it i should also read the compression method used, if any, and set self.compression_method accordingly
-        pass
+        if self.index != None and len(self.index) > 0:
+            raise ValueError("Inverted index is not empty. Clear the index before loading a new one.")
+
+        with open(file_path, 'rb') as f:
+            header = f.read(5)  # Read the first 5 bytes for the header
+            compression_code, removed_tf_flag = struct.unpack('<IB', header)
+            
+            print(f"Loading index with compression code: {compression_code}, removed_tf_flag: {removed_tf_flag}")
+
+            self.compression_method = COMPRESSION_METHODS[compression_code]
+            self.removed_tf = bool(removed_tf_flag)
+
+            if self.compression_method != 'gamma':
+                raise NotImplementedError(f"Loading index with compression method '{self.compression_method}' is not implemented yet. Only 'gamma' compression is currently supported for loading.")
+            # Now read the rest of the file for the index data
+            index_data = f.read()
+            self.decompress_index_from_file(index_data, 'gamma')  # Implement this method to parse and load the index data
+
+        return self.index #!useless 
+    
+    def decompress_index_from_file(self, index_data, decompression_method):
+
+        decomp_methods_map = { 
+            "gamma": self.__gamma_decode,
+            "delta": self.__delta_decode,
+            "varbyte": self.__varbyte_decode
+        }
+
+        if decompression_method not in decomp_methods_map:
+            raise ValueError(f"Decompression method '{decompression_method}' is not supported. Allowed methods: {list(decomp_methods_map.keys())}")
+        
+        decomp_func = decomp_methods_map[decompression_method]
+
+        moch_term = 0 #! important change to real terms from file
+
+        while len(index_data) > 0:
+            pl_size = struct.unpack('<I', index_data[:4])[0] # [0] since unpack returns a tuple
+            
+            index_data = index_data[4:] # remove the bytes we just read
+            
+            print(f"Decompressing term: {moch_term}, Posting list size: {pl_size}, Remaining data length: {len(index_data)}")
+            term = str(moch_term) #! important change to real terms from file
+            self.index[term] = []
+
+            for doc_id in decomp_func(bitarray(index_data[:pl_size])):
+                self.index[term].append(doc_id)
+            
+            index_data = index_data[pl_size:] 
+
+            moch_term += 1
+        
+        return self.index #! useless
+
+    def clear_index(self):
+        self.index = {}
+        self.dictionary = {}
+        self.num_docs = 0
+        self.compression_method = None
+        self.removed_tf = False
 
     def compress_index(self, method="gamma"):
         if self.index is None or len(self.index) == 0:
             raise ValueError("Inverted index is empty. Build the index before applying compression.")
+        if self.compression_method != None:
+            raise ValueError("Index is already compressed with method '{self.compression_method}'. Clear the index before applying new compression.")
 
         methods_map = {
             "gamma": self.__gamma_encode,
@@ -121,15 +233,20 @@ class Index:
             self.__general_compressor(methods_map[method])
         else:
             raise ValueError(f"Compression method '{method}' is not supported. Allowed methods: {list(methods_map.keys())}")
-    
+
     def __general_compressor(self, compression_func):
         for term, posting_list in self.index.items():
             compressed_postings = []
-            for doc_id, tf in posting_list:
-                # Gamma encode doc_id and tf
-                compressed_doc_id = compression_func(doc_id)
-                compressed_tf = compression_func(tf)
-                compressed_postings.append((compressed_doc_id, compressed_tf))
+            if self.removed_tf: #! can be optimzed 
+                for doc_id in posting_list:
+                    compressed_doc_id = compression_func(doc_id)
+                    compressed_postings.append(compressed_doc_id)
+            else:
+                for doc_id, tf in posting_list:
+                    # Gamma encode doc_id and tf
+                    compressed_doc_id = compression_func(doc_id)
+                    compressed_tf = compression_func(tf)
+                    compressed_postings.append((compressed_doc_id, compressed_tf))
             self.index[term] = compressed_postings
 
     def __transform_unary(self, number):
@@ -143,8 +260,8 @@ class Index:
         una = self.__transform_unary(length - 1)
 
         # print(f"Gamma encoding number: {number}, Binary: {bin_num}, Unary: {una}, Remainder: {rem}")
-        
-        return una + rem
+
+        return bitarray(una + rem)
 
     def __delta_encode(self, number):
         bin_num = bin(number)[2:]
@@ -153,7 +270,7 @@ class Index:
         length = len(bin_num)
         gamma_length = self.__gamma_encode(length)
         
-        return gamma_length + rem
+        return bitarray(gamma_length + rem)
 
     def __varbyte_encode(self, number):
         bin_num = bin(number)[2:] # remove '0b' prefix
@@ -175,27 +292,58 @@ class Index:
 
         return res
 
-    
-    def __gamma_decode(self, encoded_str): #! use yield
-        iterator = iter(encoded_str)
-        com_string = ''
-        for char in iterator:
-            if char == '0':
-                break
-            else:
-                com_string += char
-        length = len(com_string) 
-        com_string = ''
-        for _ in range(length):
-            com_string += next(iterator)
+    def __gamma_decode(self, encoded_bites): #! use yield
 
-        com_string = '1' + com_string
-        print(f"Gamma decoding string: {encoded_str}, Unary part: {'1'*length + '0'}, Remainder: {com_string[1:]}, Result: {int(com_string, 2)}")
+        # if self.removed_tf:
+
+        while len(encoded_bites) > 0:
+            to_read = 0
+            n = len(encoded_bites)
+            # print(f"Gamma decoding bitarray: {encoded_bites.to01()}")
+            print(f"remainig size to decode: {n} bits")
+
+            for i in range(n):
+                if encoded_bites[i] == 0:
+                    to_read = i
+                    break
+            
+            
+            for _ in range(to_read+1):
+                encoded_bites.pop(0)
+            
+            encoded_bites.insert(0, 1)
+
+            sep = encoded_bites[:to_read+1]
+            # print(f"Gamma decoding: Unary part: {'1'*to_read + '0'}, Remainder: {encoded_bites[to_read+1:].to01()}, Result: {ba2int(sep)}")
+
+            yield ba2int(sep) 
+
+        # encoded_bites.pop(0) #! remove the '0' that separates the unary part from the remainder
+        # encoded_bites = encoded_bites[:to_read] #! the remainder is the next to_read bits
+
+
+
+        # encoded_str = encoded_bites.to01() 
+        # iterator = iter(encoded_str)
+        # com_string = ''
+        # for char in iterator:
+        #     if char == '0':
+        #         break
+        #     else:
+        #         com_string += char
+        # length = len(com_string) 
+        # com_string = ''
+        # for _ in range(length):
+        #     com_string += next(iterator)
+
+        # com_string = '1' + com_string
+        # print(f"Gamma decoding string: {encoded_str}, Unary part: {'1'*length + '0'}, Remainder: {com_string[1:]}, Result: {int(com_string, 2)}")
         
-        return com_string
+        # return com_string
 
 
-    def __delta_decode(self, encoded_str):#! use yield
+    def __delta_decode(self, encoded_bytes): #! use yield
+        encoded_str = encoded_bytes.to01()
         iterator = iter(encoded_str)
         com_string = ''
         for char in iterator:
@@ -220,7 +368,8 @@ class Index:
         print(f"Delta decoding string: {encoded_str}, Gamma part: {'1'*lenght + '0'}, Length: {length__}, Remainder: {com_string[1:]}, Result: {int(com_string, 2)}")
         return com_string
     
-    def __varbyte_decode(self, encoded_str): 
+    def __varbyte_decode(self, encoded_bytes): #! use yield
+        encoded_str = encoded_bytes.to01()
         com_string = ''
         for i in range(0, len(encoded_str), 8):
             byte = encoded_str[i:i+8]
@@ -261,9 +410,6 @@ class Index:
                 decoded.append(int(d_gap, 2) + min)
         
         return decoded
-
-    def decompress_index(self):
-        pass
 
     def get_terms(self):
         return self.index.keys()
