@@ -141,15 +141,18 @@ class Index:
             f.write(header)
             if self.removed_tf:
                 for term, posting_list in self.index.items():
-                    l = len(posting_list)
-                    
-                    if l > MAX_UINT32:
-                        raise ValueError(f"Posting list for term '{term}' exceeds maximum length of {MAX_UINT32}. Cannot save index.")
-                    
-                    f.write(struct.pack('<I', l))  #! write the length of the posting list maybe to optimize the loading phase
+                    combined_bits = bitarray()
 
                     for doc_id in posting_list:
-                        f.write(doc_id.tobytes())
+                        combined_bits.extend(doc_id)
+                    
+                    # 1. Write the exact bit length as a 4-byte integer
+                    bit_length = len(combined_bits)
+
+                    f.write(struct.pack('<I', bit_length))
+                    
+                    # 2. Let bitarray handle the byte conversion and file write directly
+                    combined_bits.tofile(f)
                     # f.write(b'\x00')  # separator between posting lists            
             else :
                 raise NotImplementedError("Saving index with term frequencies is not implemented yet.")
@@ -171,8 +174,8 @@ class Index:
             if self.compression_method != 'gamma':
                 raise NotImplementedError(f"Loading index with compression method '{self.compression_method}' is not implemented yet. Only 'gamma' compression is currently supported for loading.")
             # Now read the rest of the file for the index data
-            index_data = f.read()
-            self.decompress_index_from_file(index_data, 'gamma')  # Implement this method to parse and load the index data
+            # index_data = f.read()
+            self.decompress_index_from_file(f, 'gamma')  # Implement this method to parse and load the index data
 
         return self.index #!useless 
     
@@ -191,23 +194,34 @@ class Index:
 
         moch_term = 0 #! important change to real terms from file
 
-        while len(index_data) > 0:
-            pl_size = struct.unpack('<I', index_data[:4])[0] # [0] since unpack returns a tuple
+        while True:
+            size_bytes = index_data.read(4)
+            if not size_bytes:
+                break # Clean End of File reached
+                
+            pl_size = struct.unpack('<I', size_bytes)[0] # [0] since unpack returns a tuple
             
-            index_data = index_data[4:] # remove the bytes we just read
-            
-            print(f"Decompressing term: {moch_term}, Posting list size: {pl_size}, Remaining data length: {len(index_data)}")
+            print(f"Decompressing term: {moch_term}, Posting list size: {pl_size}, Reading: {index_data.tell()} bytes")
             term = str(moch_term) #! important change to real terms from file
             self.index[term] = []
 
-            for doc_id in decomp_func(bitarray(index_data[:pl_size])):
-                self.index[term].append(doc_id)
-            
-            index_data = index_data[pl_size:] 
-
-            moch_term += 1
+            byte_length = (pl_size + 7) // 8
         
+            # 1. Read the bits directly out of the file stream using bitarray
+            bits = bitarray()
+            bits.fromfile(index_data, byte_length)
+            
+            # 2. Slice off the trailing padding bits required by the filesystem
+            bits = bits[:pl_size] 
+            
+            # 3. Stream the cleaned bits straight to your decoder
+            for doc_id in decomp_func(bits):
+                self.index[term].append(doc_id)
+                
+            moch_term += 1
+
         return self.index #! useless
+
 
     def clear_index(self):
         self.index = {}
@@ -295,28 +309,55 @@ class Index:
     def __gamma_decode(self, encoded_bites): #! use yield
 
         # if self.removed_tf:
-
         while len(encoded_bites) > 0:
             to_read = 0
             n = len(encoded_bites)
-            # print(f"Gamma decoding bitarray: {encoded_bites.to01()}")
-            print(f"remainig size to decode: {n} bits")
 
+            # 1. Find the first 0 (the end of the unary prefix)
             for i in range(n):
                 if encoded_bites[i] == 0:
                     to_read = i
                     break
+            else:
+                # Break out if no 0 is found to prevent an infinite loop on corrupt data
+                raise ValueError("Invalid gamma encoding: no terminating 0 found in unary prefix.")
+                
             
-            
-            for _ in range(to_read+1):
+            # 2. Remove the unary prefix entirely (the 1s and the terminating 0)
+            for _ in range(to_read + 1):
                 encoded_bites.pop(0)
             
-            encoded_bites.insert(0, 1)
+            # 3. Create a new bitarray starting with the implicit leading 1
+            sep = bitarray([1])
+            
+            # 4. Physically pop the exact number of remainder bits needed
+            for _ in range(to_read):
+                if len(encoded_bites) > 0:
+                    sep.append(encoded_bites.pop(0))
 
-            sep = encoded_bites[:to_read+1]
-            # print(f"Gamma decoding: Unary part: {'1'*to_read + '0'}, Remainder: {encoded_bites[to_read+1:].to01()}, Result: {ba2int(sep)}")
+            yield ba2int(sep)
 
-            yield ba2int(sep) 
+        # while len(encoded_bites) > 0:
+        #     to_read = 0
+        #     n = len(encoded_bites)
+        #     # print(f"Gamma decoding bitarray: {encoded_bites.to01()}")
+        #     print(f"remainig size to decode: {n} bits")
+
+        #     for i in range(n):
+        #         if encoded_bites[i] == 0:
+        #             to_read = i
+        #             break
+            
+            
+        #     for _ in range(to_read+1):
+        #         encoded_bites.pop(0)
+            
+        #     encoded_bites.insert(0, 1)
+
+        #     sep = encoded_bites[:to_read+1]
+        #     # print(f"Gamma decoding: Unary part: {'1'*to_read + '0'}, Remainder: {encoded_bites[to_read+1:].to01()}, Result: {ba2int(sep)}")
+
+        #     yield ba2int(sep) 
 
         # encoded_bites.pop(0) #! remove the '0' that separates the unary part from the remainder
         # encoded_bites = encoded_bites[:to_read] #! the remainder is the next to_read bits
