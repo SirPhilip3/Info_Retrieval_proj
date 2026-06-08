@@ -21,7 +21,6 @@ COMPRESSION_METHODS = {
 
 MAX_UINT32 = 2**32 - 1
 
-
 class Index:
     def __init__(self):
         self.index = {}
@@ -124,7 +123,6 @@ class Index:
         self.removed_tf = True
 
 
-
     def build_header(self):
         compression_code = COMPRESSION_CODES[self.compression_method]
         header = struct.pack('<IB', compression_code, self.removed_tf)
@@ -141,15 +139,18 @@ class Index:
             f.write(header)
             if self.removed_tf:
                 for term, posting_list in self.index.items():
+
+                    # 1. Write the exact bit length as a 4-byte integer
+                    bit_length = len(combined_bits)
+                    
+                    if bit_length > MAX_UINT32:
+                        raise ValueError(f"Posting list for term '{term}' is too large to be represented in 4 bytes. Bit length: {bit_length} bits.")
+
+                    f.write(struct.pack('<I', bit_length))
                     combined_bits = bitarray()
 
                     for doc_id in posting_list:
                         combined_bits.extend(doc_id)
-                    
-                    # 1. Write the exact bit length as a 4-byte integer
-                    bit_length = len(combined_bits)
-
-                    f.write(struct.pack('<I', bit_length))
                     
                     # 2. Let bitarray handle the byte conversion and file write directly
                     combined_bits.tofile(f)
@@ -167,12 +168,14 @@ class Index:
             compression_code, removed_tf_flag = struct.unpack('<IB', header)
             
             print(f"Loading index with compression code: {compression_code}, removed_tf_flag: {removed_tf_flag}")
-
-            self.compression_method = COMPRESSION_METHODS[compression_code]
+            
+            detected_compression_method = COMPRESSION_METHODS[compression_code]
+            # self.compression_method = COMPRESSION_METHODS[compression_code]
+            self.compression_method = None #! since we output the decoded index
             self.removed_tf = bool(removed_tf_flag)
 
-            if self.compression_method != 'gamma':
-                raise NotImplementedError(f"Loading index with compression method '{self.compression_method}' is not implemented yet. Only 'gamma' compression is currently supported for loading.")
+            if detected_compression_method != 'gamma':
+                raise NotImplementedError(f"Loading index with compression method '{detected_compression_method}' is not implemented yet. Only 'gamma' compression is currently supported for loading.")
             # Now read the rest of the file for the index data
             # index_data = f.read()
             self.decompress_index_from_file(f, 'gamma')  # Implement this method to parse and load the index data
