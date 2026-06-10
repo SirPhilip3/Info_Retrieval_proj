@@ -139,7 +139,7 @@ class Index:
         if self.compression_method != None:
             raise ValueError("Index is already compressed with method '{self.compression_method}'. Clear the index before applying new compression.")
 
-        methods_map = {
+        methods_map = { #! better way to do this ? 
             "gamma": self.compressor.gamma_encode,
             "delta": self.compressor.delta_encode,
             "varbyte": self.compressor.varbyte_encode
@@ -179,108 +179,44 @@ class Index:
                 doc_ids.add(doc_id)
         return sorted(doc_ids)
     
-    # def get_approx_size(self):
-    #     size = 0
-    #     for term, posting_list in self.index.items():
-    #         size += len(term) + 1  # term length + separator
-    #         size += len(posting_list) * (4 + 4)  # doc_id (4 bytes) + tf (4 bytes)
-    #     return size
-    
-    # def get_approx_size(self, bytes_per_doc_id=4, bytes_per_tf=4, include_term_bytes=True, encoding="utf-8"):
-    #     """
-    #     Approximate serialized size of the inverted index in bytes.
+    def get_approx_size(self, include_term_bytes=False):
+        if include_term_bytes:
+            raise NotImplementedError("Term byte size calculation is not implemented yet.")
 
-    #     Assumptions:
-    #     - each posting stores (doc_id, tf)
-    #     - doc_id uses bytes_per_doc_id bytes
-    #     - tf uses bytes_per_tf bytes
-    #     - optionally include term bytes (UTF-8 by default)
-    #     """
-    #     posting_bytes = bytes_per_doc_id + bytes_per_tf
-    #     total = 0
-
-    #     for term, posting_list in self.index.items():
-    #         if include_term_bytes:
-    #             total += len(term.encode(encoding))
-    #         total += len(posting_list) * posting_bytes
-
-    #     return total
-
-    def get_approx_size(self, include_term_bytes=False, encoding="utf-8"):
         term_bytes = 0
-        doc_id_bytes = 0
-        tf_bytes = 0
-        total = 0
+        doc_id_bits = 0
+        tf_bits = 0
 
         for term, posting_list in self.index.items():
-            if include_term_bytes:
-                term_size = len(term.encode(encoding))
-                term_bytes += term_size
-                total += term_size
-
             if self.compression_method is None:
-                # uncompressed
+                num_postings = len(posting_list)
+                if self.removed_tf:
+                    doc_id_bits += num_postings * 32
+                else:
+                    doc_id_bits += num_postings * 32
+                    tf_bits += num_postings * 32
+            else:
                 for posting in posting_list:
                     if self.removed_tf:
-                        # posting is just a doc_id
-                        doc_id_size = len(str(posting))
-                        doc_id_bytes += doc_id_size
-                        total += doc_id_size
+                        doc_id_bits += len(posting)
                     else:
-                        # posting is a tuple (doc_id, tf)
-                        if isinstance(posting, tuple):
-                            doc_id = posting[0]
-                            tf = posting[1]
-                            doc_id_size = len(str(doc_id))
-                            tf_size = len(str(tf))
-                            doc_id_bytes += doc_id_size
-                            tf_bytes += tf_size
-                            total += doc_id_size + tf_size
-                        else:
-                            doc_id_size = len(str(posting))
-                            doc_id_bytes += doc_id_size
-                            total += doc_id_size
+                        doc_id_bits += len(posting[0])
+                        tf_bits += len(posting[1])
 
-            else:
-                # compressed
-                for posting in posting_list:
-                    if self.removed_tf:
-                        # posting is just a doc_id (string)
-                        doc_id_size = len(posting)
-                        doc_id_bytes += doc_id_size
-                        total += doc_id_size
-                    else:
-                        # posting is a tuple of compressed strings
-                        if isinstance(posting, tuple):
-                            doc_id_size = len(posting[0])
-                            tf_size = len(posting[1])
-                            doc_id_bytes += doc_id_size
-                            tf_bytes += tf_size
-                            total += doc_id_size + tf_size
-                        else:
-                            doc_id_size = len(posting)
-                            doc_id_bytes += doc_id_size
-                            total += doc_id_size
+        total_bits = doc_id_bits + tf_bits
 
-        # Format sizes
-        def format_size(bytes_val):
-            kb = bytes_val / 1024
-            mb = kb / 1024
-            if mb >= 1:
-                return f"{bytes_val:,} bytes ({kb:,.2f} KB / {mb:,.2f} MB)"
-            elif kb >= 1:
-                return f"{bytes_val:,} bytes ({kb:,.2f} KB)"
-            else:
-                return f"{bytes_val:,} bytes"
+        result = {
+            "term_bytes": term_bytes,
+            "doc_id_bits": doc_id_bits,
+            "tf_bits": tf_bits,
+            "total_bits": total_bits,
+            "total_bytes": total_bits / 8,
+        }
 
-        # Build detailed report
-        report = f"""
-                === Index Size Breakdown ===
-                Total Size: {format_size(total)}
-                - Term Bytes: {format_size(term_bytes)} ({term_bytes/total*100:.2f}%)
-                - Doc ID Bytes: {format_size(doc_id_bytes)} ({doc_id_bytes/total*100:.2f}%)
-                - TF Bytes: {format_size(tf_bytes)} ({tf_bytes/total*100:.2f}%)
-                """
-        
-        print(report)
-        return total
+        print("\n=== Index Size Breakdown ===")
+        print(f"Doc ID bits:  {doc_id_bits:,}")
+        print(f"TF bits:      {tf_bits:,}")
+        print(f"Total bits:   {total_bits:,}")
+        print(f"Total bytes:  {total_bits / 8:,.2f}")
+
+        return result

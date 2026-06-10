@@ -33,7 +33,7 @@ class IndexCompressor:
 
         # print(f"Gamma encoding number: {number}, Binary: {bin_num}, Unary: {una}, Remainder: {rem}")
 
-        return bitarray(una + rem) #! should be better reimplemented with bitarray directly 
+        return bitarray(una + rem) #! should be better reimplemented with bitarray directly ALSO YIELD
 
     def delta_encode(self, number):
         bin_num = bin(number)[2:]
@@ -42,7 +42,7 @@ class IndexCompressor:
         length = len(bin_num)
         gamma_length = self.gamma_encode(length)
         
-        return bitarray(gamma_length + rem) #! should be better reimplemented with bitarray directly 
+        return bitarray(gamma_length + rem) #! should be better reimplemented with bitarray directly ALSO YIELD
 
     def varbyte_encode(self, number):
         bin_num = bin(number)[2:] # remove '0b' prefix
@@ -62,7 +62,7 @@ class IndexCompressor:
         
         res = ''.join(other_bytes + [last_byte])
 
-        return bitarray(res) #! should be better reimplemented with bitarray directly
+        return bitarray(res) #! should be better reimplemented with bitarray directly ALSO YIELD
 
     def gamma_decode(self, encoded_bytes): #! use yield
 
@@ -83,7 +83,7 @@ class IndexCompressor:
             
             # 2. Remove the unary prefix entirely (the 1s and the terminating 0)
             for _ in range(to_read + 1):
-                encoded_bytes.pop(0)
+                encoded_bytes.pop(0) #! bad performance maybe bc it needs to shift the whole array every time, maybe we can just keep an index pointer instead of popping
             
             # 3. Create a new bitarray starting with the implicit leading 1
             res = bitarray([1])
@@ -136,17 +136,43 @@ class IndexCompressor:
             yield ba2int(res)
 
     def varbyte_decode(self, encoded_bytes): #! use yield
-        encoded_str = encoded_bytes.to01()
-        com_string = ''
-        for i in range(0, len(encoded_str), 8):
-            byte = encoded_str[i:i+8]
-            if byte[0] == '0':  # last byte
-                com_string += byte[1:]
-            else:
-                com_string += byte[1:]
-                print(f"Varbyte decoding string: {encoded_str}, Byte: {byte}, Result so far: {int(com_string, 2)}")
-                yield com_string
-                com_string = ''
+
+        while len(encoded_bytes) > 0:
+            first_bit = encoded_bytes.pop(0)
+            current_byte = bitarray()  
+            while first_bit == 0:
+                # Read the next 7 bits for the current byte
+                for _ in range(7):
+                    if len(encoded_bytes) > 0:
+                        current_byte.append(encoded_bytes.pop(0))
+                    else:
+                        raise ValueError("Invalid varbyte encoding: stream cut off during byte extraction.")
+                
+                if len(encoded_bytes) > 0:
+                    first_bit = encoded_bytes.pop(0)
+                else:
+                    raise ValueError("Invalid varbyte encoding: stream cut off after last byte.")
+            
+            for _ in range(7):
+                if len(encoded_bytes) > 0:
+                    current_byte.append(encoded_bytes.pop(0))
+                else:
+                    raise ValueError("Invalid varbyte encoding: stream cut off during last byte extraction.")
+                
+            yield ba2int(current_byte)
+            current_byte.clear()
+
+        # encoded_str = encoded_bytes.to01()
+        # com_string = ''
+        # for i in range(0, len(encoded_str), 8):
+        #     byte = encoded_str[i:i+8]
+        #     if byte[0] == '0':  # last byte
+        #         com_string += byte[1:]
+        #     else:
+        #         com_string += byte[1:]
+        #         print(f"Varbyte decoding string: {encoded_str}, Byte: {byte}, Result so far: {int(com_string, 2)}")
+        #         yield com_string
+        #         com_string = ''
 
         # return com_string
 

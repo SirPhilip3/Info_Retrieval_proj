@@ -79,7 +79,7 @@ class IndexStorage:
             self.index_obj.compression_method = None #! bc at the end the index will have docids as integers
             self.index_obj.removed_tf = bool(removed_tf_flag)
 
-            self.decompress_index_from_file(f, 'gamma')  # Implement this method to parse and load the index data
+            self.decompress_index_from_file(f, detected_method)  # Implement this method to parse and load the index data
 
             # self.raw_read(f)
 
@@ -108,7 +108,7 @@ class IndexStorage:
                 
             pl_size = struct.unpack('<I', size_bytes)[0] # [0] since unpack returns a tuple
             
-            print(f"Decompressing term: {moch_term}, Posting list size: {pl_size}, Reading: {index_data.tell()} bytes")
+            # print(f"Decompressing term: {moch_term}, Posting list size: {pl_size}, Reading: {index_data.tell()} bytes")
             term = str(moch_term) #! important change to real terms from file
             self.index_obj.index[term] = []
 
@@ -121,9 +121,15 @@ class IndexStorage:
             # 2. Slice off the trailing padding bits required by the filesystem
             bits = bits[:pl_size] 
             
-            # 3. Stream the cleaned bits straight to your decoder
-            for doc_id in decomp_func(bits):
-                self.index_obj.index[term].append(doc_id)
+            if self.index_obj.removed_tf:
+                for doc_id in decomp_func(bits):
+                    self.index_obj.index[term].append(doc_id)
+            else:
+                iterator = iter(decomp_func(bits)) #! maybe better to implement the decompression functions as generators that yield doc_id and tf pairs directly instead of returning a list, so we can avoid storing the whole decompressed posting list in memory at once
+
+                # 2. Zip it with itself to group elements into pairs of 2
+                for doc_id, tf in zip(iterator, iterator):
+                    self.index_obj.index[term].append((doc_id, tf))
                 
             moch_term += 1
 
