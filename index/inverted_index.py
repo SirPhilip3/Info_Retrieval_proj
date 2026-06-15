@@ -20,7 +20,7 @@ class Index:
         self.compressor = IndexCompressor(index_obj=self)
         self.storage = IndexStorage(index_obj=self, file_path=None)
 
-    def build_index(self, dataset, my_tokenizer, d_gap=False , max_num_docs=1001):
+    def build_index(self, dataset, my_tokenizer, d_gap=False, max_num_docs=1001):
         if d_gap:
             return self.d_gap_index(dataset, my_tokenizer, max_num_docs)
         else:
@@ -220,3 +220,27 @@ class Index:
         print(f"Total bytes:  {total_bits / 8:,.2f}")
 
         return result
+    
+
+    def compute_docId_termId(self, dataset, tokenizer, max_num_docs=1001):
+        terms = self.get_terms()
+        term_index = {term: idx for idx, term in enumerate(terms)}
+
+        doc_set = {}
+
+        for i, doc in enumerate(dataset.docs_iter()):
+            if i == max_num_docs:
+                break
+
+            doc_id = i+1
+            doc_terms = tokenizer(doc.text)
+            for term in doc_terms:
+                if term in term_index: #useless maybe
+                    term_id = term_index[term]
+                    if doc_id not in doc_set:
+                        doc_set[doc_id] = list()
+                    doc_set[doc_id].append(term_id)
+
+        print(doc_set)
+        return doc_set
+            
