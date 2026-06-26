@@ -32,8 +32,15 @@ class Index:
         count_postings = 0  # number of postings
         docid = 0           # docid assigned sequentially during the parsing
 
+        total_docs = dataset.docs_count()
+
         for i, doc in enumerate(dataset.docs_iter()):
             
+            # print dynamic progress
+            if i % 1000 == 0 and i > 0:
+                percentage = (i / total_docs) * 100
+                print(f"\rProcessing: {percentage:6.1f}% [{i}/{total_docs}] | Current docid: {i:<20}", end="", flush=True)
+
             if i == max_num_docs:
                 break
 
@@ -57,7 +64,8 @@ class Index:
                     count_postings += 1
                     
         self.num_docs = count_docs
-        return self.index
+        # print("bef return")
+        # return self.index
 
     def d_gap_index(self, dataset, my_tokenizer, max_num_docs=1001):
 
@@ -100,7 +108,7 @@ class Index:
                     self.index[el] = [(docid, 1)]
                     count_postings += 1
 
-        return self.index
+        # return self.index
     
     def remove_tf(self):
         """Remove term frequencies from the index, leaving only document IDs."""
@@ -147,9 +155,27 @@ class Index:
 
         if method in methods_map:
             self.compression_method = method
-            self.compressor.general_compressor(methods_map[method])
+            self.compressor.apply_index_transformation(methods_map[method])
         else:
             raise ValueError(f"Compression method '{method}' is not supported. Allowed methods: {list(methods_map.keys())}")
+        
+    def decompress_index(self):
+        if self.index is None or len(self.index) == 0:
+            raise ValueError("Inverted index is empty. Build the index before applying decompression.")
+        if self.compression_method is None:
+            raise ValueError("Index is not compressed. Cannot apply decompression.")
+
+        methods_map = {
+            "gamma": self.compressor.gamma_decode,
+            "delta": self.compressor.delta_decode,
+            "varbyte": self.compressor.varbyte_decode
+        }
+
+        if self.compression_method in methods_map:
+            self.compressor.apply_index_transformation(methods_map[self.compression_method], is_decompressing=True)
+            self.compression_method = None  # Reset compression method after decompression
+        else:
+            raise ValueError(f"Decompression method '{self.compression_method}' is not supported. Allowed methods: {list(methods_map.keys())}")
 
     def get_terms(self):
         return self.index.keys()

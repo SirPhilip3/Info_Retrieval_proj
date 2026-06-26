@@ -6,18 +6,24 @@ class IndexCompressor:
     def __init__(self, index_obj=None):
         self.index_obj = index_obj
 
-    def general_compressor(self, compression_func):
+    def apply_index_transformation(self, transform_func, is_decompressing=False):
         for term, posting_list in self.index_obj.index.items():
             compressed_postings = []
+
+            def run_transform(item):
+                output = transform_func(item)
+                # If it's a generator decoder, extract the yielded value
+                return next(output) if is_decompressing else output
+
             if self.index_obj.removed_tf: #! can be optimzed 
                 for doc_id in posting_list:
-                    compressed_doc_id = compression_func(doc_id)
+                    compressed_doc_id = run_transform(doc_id)
                     compressed_postings.append(compressed_doc_id)
             else:
                 for doc_id, tf in posting_list:
                     # Gamma encode doc_id and tf
-                    compressed_doc_id = compression_func(doc_id)
-                    compressed_tf = compression_func(tf)
+                    compressed_doc_id = run_transform(doc_id)
+                    compressed_tf = run_transform(tf)
                     compressed_postings.append((compressed_doc_id, compressed_tf))
             self.index_obj.index[term] = compressed_postings
 
@@ -66,15 +72,18 @@ class IndexCompressor:
 
     def gamma_decode(self, encoded_bytes): #! use yield
 
-        # if self.removed_tf:
-        while len(encoded_bytes) > 0:
-            to_read = 0
-            n = len(encoded_bytes)
+        ptr = 0
+        total_length = len(encoded_bytes)
 
+        # if self.removed_tf:
+        while ptr < total_length:
+            to_read = 0
+            n = total_length - ptr
+            
             # 1. Find the first 0 (the end of the unary prefix)
-            for i in range(n):
+            for i in range(ptr, total_length):
                 if encoded_bytes[i] == 0:
-                    to_read = i
+                    to_read = i - ptr
                     break
             else:
                 # Break out if no 0 is found to prevent an infinite loop on corrupt data
@@ -82,16 +91,23 @@ class IndexCompressor:
                 
             
             # 2. Remove the unary prefix entirely (the 1s and the terminating 0)
-            for _ in range(to_read + 1):
-                encoded_bytes.pop(0) #! bad performance maybe bc it needs to shift the whole array every time, maybe we can just keep an index pointer instead of popping
+            # for _ in range(to_read + 1):
+            #     encoded_bytes.pop(0) #! bad performance maybe bc it needs to shift the whole array every time, maybe we can just keep an index pointer instead of popping
             
             # 3. Create a new bitarray starting with the implicit leading 1
+            
+            remainder_start = ptr + to_read + 1
+            remainder_end = remainder_start + to_read
+
             res = bitarray([1])
+            res.extend(encoded_bytes[remainder_start:remainder_end])  # Add the remainder bits
             
             # 4. Physically pop the exact number of remainder bits needed
-            for _ in range(to_read):
-                if len(encoded_bytes) > 0: #! could be useless
-                    res.append(encoded_bytes.pop(0))
+            # for _ in range(to_read):
+            #     if len(encoded_bytes) > 0: #! could be useless
+            #         res.append(encoded_bytes.pop(0))
+            
+            ptr = remainder_end  # Move the pointer past the remainder bits
 
             yield ba2int(res)
 
