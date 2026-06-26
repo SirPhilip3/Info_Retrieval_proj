@@ -82,24 +82,48 @@ class IndexCompressor:
         # return bitarray(gamma_length + rem) #! should be better reimplemented with bitarray directly ALSO YIELD
 
     def varbyte_encode(self, number):
-        bin_num = bin(number)[2:] # remove '0b' prefix
+        if number == 0:
+            return bitarray([1, 0, 0, 0, 0, 0, 0, 0])
 
-        # print(f"Encoding number: {number}, Binary representation: {bin_num}")
+        chunks = []
+        is_first = True
+        
+        # Extract 7-bit blocks from right to left using fast bitwise shifts
+        while number > 0:
+            chunk = number & 0x7F  # Get lower 7 bits
+            
+            # Construct the 8-bit block directly: [Flag Bit] + [7 Payload Bits]
+            block = bitarray([1 if is_first else 0])
+            block.extend(int2ba(chunk, length=7))
+            
+            chunks.append(block)
+            number >>= 7  # Shift right by 7 bits
+            is_first = False
 
-        cl = ((len(bin_num) + 6) // 7) * 7
-        bin_num = bin_num.zfill(cl)  # Pad with leading zeros to make its length a multiple of 8
-        spits = [bin_num[i:i+7] for i in range(0, len(bin_num), 7)]
-        
-        # print(f"Number: {number}, Binary: {bin_num}, Spits: {spits}")
-        
-        last_byte = '1' + spits[-1]
-        other_bytes = ['0' + s for s in spits[:-1]]
-        
-        # print(f"Last byte: {last_byte}, Other bytes: {other_bytes}")
-        
-        res = ''.join(other_bytes + [last_byte])
+        # Since we went right-to-left (LSB to MSB), reverse chunks into a final bitarray
+        res = bitarray()
+        for block in reversed(chunks):
+            res.extend(block)
+            
+        return res
+        # bin_num = bin(number)[2:] # remove '0b' prefix
 
-        return bitarray(res) #! should be better reimplemented with bitarray directly ALSO YIELD
+        # # print(f"Encoding number: {number}, Binary representation: {bin_num}")
+
+        # cl = ((len(bin_num) + 6) // 7) * 7
+        # bin_num = bin_num.zfill(cl)  # Pad with leading zeros to make its length a multiple of 8
+        # spits = [bin_num[i:i+7] for i in range(0, len(bin_num), 7)]
+        
+        # # print(f"Number: {number}, Binary: {bin_num}, Spits: {spits}")
+        
+        # last_byte = '1' + spits[-1]
+        # other_bytes = ['0' + s for s in spits[:-1]]
+        
+        # # print(f"Last byte: {last_byte}, Other bytes: {other_bytes}")
+        
+        # res = ''.join(other_bytes + [last_byte])
+
+        # return bitarray(res) #! should be better reimplemented with bitarray directly ALSO YIELD
 
     def gamma_decode(self, encoded_bytes, verbose=False): #! use yield
 
@@ -280,4 +304,12 @@ class IndexCompressor:
             else:
                 decoded.append(int(d_gap, 2) + min)
         
-        return decoded
+        return decoded 
+    
+    def no_decompression(self, encoded_bytes):
+        ptr = 0
+        total_length = len(encoded_bytes)
+        while ptr < total_length:
+            number = ba2int(encoded_bytes[ptr:ptr+32])  # Assuming 32 bits for each integer
+            ptr += 32
+            yield number

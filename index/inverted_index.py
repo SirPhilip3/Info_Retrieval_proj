@@ -11,7 +11,7 @@ class Index:
         self.dictionary = {}
         
         self.num_docs = 0
-        self.compression_method = None
+        self.compression_method = "None"
         self.removed_tf = False
 
         # self.compression_function = None
@@ -154,13 +154,13 @@ class Index:
         self.index = {}
         self.dictionary = {}
         self.num_docs = 0
-        self.compression_method = None
+        self.compression_method = "None"
         self.removed_tf = False
 
     def compress_index(self, method="gamma"):
         if self.index is None or len(self.index) == 0:
             raise ValueError("Inverted index is empty. Build the index before applying compression.")
-        if self.compression_method != None:
+        if self.compression_method != "None":
             raise ValueError("Index is already compressed with method '{self.compression_method}'. Clear the index before applying new compression.")
 
         methods_map = { #! better way to do this ? 
@@ -178,7 +178,7 @@ class Index:
     def decompress_index(self):
         if self.index is None or len(self.index) == 0:
             raise ValueError("Inverted index is empty. Build the index before applying decompression.")
-        if self.compression_method is None:
+        if self.compression_method == "None":
             raise ValueError("Index is not compressed. Cannot apply decompression.")
 
         methods_map = {
@@ -189,7 +189,7 @@ class Index:
 
         if self.compression_method in methods_map:
             self.compressor.apply_index_transformation(methods_map[self.compression_method], is_decompressing=True)
-            self.compression_method = None  # Reset compression method after decompression
+            self.compression_method = "None"  # Reset compression method after decompression
         else:
             raise ValueError(f"Decompression method '{self.compression_method}' is not supported. Allowed methods: {list(methods_map.keys())}")
 
@@ -230,7 +230,7 @@ class Index:
         tf_bits = 0
 
         for term, posting_list in self.index.items():
-            if self.compression_method is None:
+            if self.compression_method == "None":
                 num_postings = len(posting_list)
                 if self.removed_tf:
                     doc_id_bits += num_postings * 32

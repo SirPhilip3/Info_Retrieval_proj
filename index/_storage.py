@@ -1,15 +1,16 @@
 import struct
 from bitarray import bitarray
+from bitarray.util import int2ba, ba2int
 
 COMPRESSION_CODES = {
-    None: 0,
+    "None": 0,
     "gamma": 1,
     "delta": 2,
     "varbyte": 3,
 }
 
 COMPRESSION_METHODS = {
-    0: None,
+    0: "None",
     1: "gamma",
     2: "delta",
     3: "varbyte",
@@ -38,19 +39,35 @@ class IndexStorage:
             
             f.write(header)
 
+            combined_bits = bitarray()
+
             for term, posting_list in self.index_obj.index.items():
 
-                combined_bits = bitarray()
+                combined_bits.clear()  # Reset combined_bits for each term
+
+                term_bytes = term.encode('utf-8')
+                term_len = len(term_bytes)
+                f.write(struct.pack('<I', term_len))
+                f.write(struct.pack(f'<{term_len}s', term_bytes))
                 
                 if self.index_obj.removed_tf:
                     for doc_id in posting_list:
-                        # print(f"Compressing term: {term}, doc_id: {doc_id}")
-                        combined_bits.extend(doc_id) #! doesnt work with plain inegers
+
+                        if isinstance(doc_id, int):
+                            combined_bits.extend(int2ba(doc_id, length=32))  # Convert integer to bitarray of fixed length
+                        else:
+                            # print(f"Compressing term: {term}, doc_id: {doc_id}")
+                            combined_bits.extend(doc_id) #! doesnt work with plain inegers
                     
                 else: #! if we have term frequencies, we interleave doc_ids and tfs in the bitarray
                     for doc_id, tf in posting_list:
-                        combined_bits.extend(doc_id)
-                        combined_bits.extend(tf)
+                        if isinstance(doc_id, int):
+                            combined_bits.extend(int2ba(doc_id, length=32))
+                            combined_bits.extend(int2ba(tf, length=32))  # Convert integer to bitarray of fixed length
+                        else:   
+                            # print(f"Compressing term: {term}, doc_id: {doc_id}, tf: {tf}")
+                            combined_bits.extend(doc_id)
+                            combined_bits.extend(tf)
 
                 bit_length = len(combined_bits)
 
@@ -76,7 +93,7 @@ class IndexStorage:
             
             detected_method = COMPRESSION_METHODS[compression_code]
             # self.index_obj.compression_method = COMPRESSION_METHODS[compression_code]
-            self.index_obj.compression_method = None #! bc at the end the index will have docids as integers
+            self.index_obj.compression_method = "None" #! bc at the end the index will have docids as integers
             self.index_obj.removed_tf = bool(removed_tf_flag)
 
             self.decompress_index_from_file(f, detected_method)  # Implement this method to parse and load the index data
@@ -89,6 +106,7 @@ class IndexStorage:
     def decompress_index_from_file(self, index_data, decompression_method):
 
         decomp_methods_map = { 
+            "None" : self.index_obj.compressor.no_decompression,
             "gamma": self.index_obj.compressor.gamma_decode,
             "delta": self.index_obj.compressor.delta_decode,
             "varbyte": self.index_obj.compressor.varbyte_decode
@@ -102,6 +120,17 @@ class IndexStorage:
         moch_term = 0 #! important change to real terms from file
 
         while True:
+            term_len_bytes = index_data.read(4)
+            if not term_len_bytes:
+                break # Clean End of File reached
+
+            term_len = struct.unpack('<I', term_len_bytes)[0]
+            term_bytes = index_data.read(term_len)
+            if not term_bytes:
+                break # Clean End of File reached
+
+            term = term_bytes.decode('utf-8') #! important change to real terms from file
+
             size_bytes = index_data.read(4)
             if not size_bytes:
                 break # Clean End of File reached
@@ -109,7 +138,7 @@ class IndexStorage:
             pl_size = struct.unpack('<I', size_bytes)[0] # [0] since unpack returns a tuple
             
             # print(f"Decompressing term: {moch_term}, Posting list size: {pl_size}, Reading: {index_data.tell()} bytes")
-            term = str(moch_term) #! important change to real terms from file
+            # term = str(moch_term) #! important change to real terms from file
             self.index_obj.index[term] = []
 
             byte_length = (pl_size + 7) // 8
