@@ -1,9 +1,9 @@
 from sklearn.preprocessing import normalize
-from sklearn_extra.cluster import KMedoids
 from sklearn.cluster import KMeans
 from scipy.sparse import csr_matrix
 from collections import defaultdict
 from sklearn.metrics import pairwise_distances
+from sklearn.metrics import pairwise_distances_argmin
 import networkx as nx
 import numpy as np
 
@@ -57,29 +57,33 @@ def k_medoids(df, k, verbose = False): # TODO vary for k vs execution time!
     # cluster of each document
     labels = model.labels_
 
-    medoids = []
+    medoids_id = []
 
     for i in range(model.n_clusters):
         cluster_docs = np.flatnonzero(labels == i)
         cluster_vectors = norm_df[cluster_docs]
-        medoid_idx = np.argmin(np.linalg.norm(cluster_vectors - model.cluster_centers_[i], axis=1))
-        medoids.append(cluster_docs[medoid_idx])
+        
+        centroid = model.cluster_centers_[i].reshape(1, -1)
+
+        closest = pairwise_distances_argmin(cluster_vectors, centroid, metric='euclidean')[0]
+
+        medoids_id.append(cluster_docs[closest])
 
     # medoid_vectors = norm_df[medoids].toarray()
 
-    medoid_vectors = norm_df[medoids]
+    medoid_vectors = norm_df[medoids_id]
     nonzero_cols = medoid_vectors.getnnz(axis=0) > 0
     medoid_vectors = medoid_vectors[:, nonzero_cols].toarray()
 
     cluster_to_docs = {}
 
-    for cluster_id, medoid_doc in enumerate(medoids):
+    for cluster_id, medoid_doc in enumerate(medoids_id):
         cluster_to_docs[medoid_doc] = np.flatnonzero(labels == cluster_id).tolist()
 
     if verbose:
-        print("Medoid DocIDs:", medoids)
+        print("Medoid DocIDs:", medoids_id)
 
-    return medoids, cluster_to_docs
+    return medoid_vectors, medoids_id, cluster_to_docs
 
 
 
@@ -154,24 +158,25 @@ def calculate_distance_matrix(medoid_vectors, method="euclidean"):
     elif method == "cosine":
         return pairwise_distances(medoid_vectors, metric="cosine")
     elif method == "jaccard":
-        #  calculate only the upper triangular matrix
-        n = len(medoid_vectors)
-        dist = np.zeros((n, n))
+        return pairwise_distances((medoid_vectors > 0).astype(np.uint8), metric="jaccard")
+        # #  calculate only the upper triangular matrix
+        # n = len(medoid_vectors)
+        # dist = np.zeros((n, n))
         
-        # Trasformiamo in set una volta sola prima dei cicli
-        sets = [set(v) for v in medoid_vectors]
+        # # Trasformiamo in set una volta sola prima dei cicli
+        # sets = [set(v) for v in medoid_vectors]
 
-        for i in range(n):
-            for j in range(i + 1, n):  # Parte da i+1 per sfruttare la simmetria
-                intersection = len(sets[i].intersection(sets[j]))
-                union = len(sets[i].union(sets[j]))
+        # for i in range(n):
+        #     for j in range(i + 1, n):  # Parte da i+1 per sfruttare la simmetria
+        #         intersection = len(sets[i].intersection(sets[j]))
+        #         union = len(sets[i].union(sets[j]))
                 
-                jaccard_dist = 1 - (intersection / union) if union > 0 else 1
+        #         jaccard_dist = 1 - (intersection / union) if union > 0 else 1
                 
-                dist[i][j] = jaccard_dist
-                dist[j][i] = jaccard_dist  # Specchia il risultato
+        #         dist[i][j] = jaccard_dist
+        #         dist[j][i] = jaccard_dist  # Specchia il risultato
                 
-        return dist
+        # return dist
     
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -192,7 +197,7 @@ def tsp_path(dist_matrix, verbose=False):
     tsp_graph = nx.from_numpy_array(dist_matrix)
     tsp_path = tsp(tsp_graph, cycle=False)
 
-    if(verbose):
+    if verbose:
         print("TSP path (medoid indices):", tsp_path)
 
     return tsp_path
