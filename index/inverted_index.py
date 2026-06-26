@@ -32,7 +32,11 @@ class Index:
         count_postings = 0  # number of postings
         docid = 0           # docid assigned sequentially during the parsing
 
-        total_docs = dataset.docs_count()
+        total_docs = 0
+        if max_num_docs < dataset.docs_count():
+            total_docs = dataset.docs_count()
+        else:
+            total_docs = max_num_docs
 
         for i, doc in enumerate(dataset.docs_iter()):
             
@@ -73,9 +77,21 @@ class Index:
         count_docs = 0      # number of docs
         # count_tokens = 0    # number of tokens
         count_postings = 0  # number of postings
+        
         previous_docid = {}
+        
+
+        total_docs = 0
+        if max_num_docs < dataset.docs_count():
+            total_docs = dataset.docs_count()
+        else:
+            total_docs = max_num_docs
 
         for i, doc in enumerate(dataset.docs_iter()):
+
+            if i % 1000 == 0 and i > 0:
+                percentage = (i / total_docs) * 100
+                print(f"\rProcessing: {percentage:6.1f}% [{i}/{total_docs}] | Current docid: {i:<20}", end="", flush=True)
             
             if i == max_num_docs:
                 break

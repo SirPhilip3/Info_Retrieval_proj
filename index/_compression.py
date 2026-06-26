@@ -28,27 +28,58 @@ class IndexCompressor:
             self.index_obj.index[term] = compressed_postings
 
     def transform_unary(self, number):
-        return '1' * number + '0'
+        return bitarray([1] * number + [0])
+        # return '1' * number + '0'
 
     def gamma_encode(self, number):
-        bin_num = bin(number)[2:]
 
-        rem = bin_num[1:]  # remove leading '1'
-        length = len(bin_num)
-        una = self.transform_unary(length - 1)
+        if number <= 0:
+            raise ValueError("Gamma encoding requires positive integers.")
+            
+        length = number.bit_length()  # Fast O(1) way to find binary length
+        
+        # 1. Unary prefix for (length - 1)
+        res = self.transform_unary(length - 1)
+        
+        # 2. Append the binary remainder (all bits after the leading 1)
+        if length > 1:
+            res.extend(int2ba(number)[1:])
 
-        # print(f"Gamma encoding number: {number}, Binary: {bin_num}, Unary: {una}, Remainder: {rem}")
+        # print(f"Gamma encoding number: {number}, Length: {length}, Unary: {res[:length-1]}, Remainder: {res[length-1:]}")
+            
+        return res
 
-        return bitarray(una + rem) #! should be better reimplemented with bitarray directly ALSO YIELD
+        # bin_num = bin(number)[2:]
+
+        # rem = bin_num[1:]  # remove leading '1'
+        # length = len(bin_num)
+        # una = self.transform_unary(length - 1)
+
+        # # print(f"Gamma encoding number: {number}, Binary: {bin_num}, Unary: {una}, Remainder: {rem}")
+
+        # return bitarray(una + rem) #! should be better reimplemented with bitarray directly ALSO YIELD
 
     def delta_encode(self, number):
-        bin_num = bin(number)[2:]
-
-        rem = bin_num[1:]  # remove leading '1'
-        length = len(bin_num)
-        gamma_length = self.gamma_encode(length)
+        if number <= 0:
+            raise ValueError("Delta encoding requires positive integers.")
+            
+        length = number.bit_length()
         
-        return bitarray(gamma_length + rem) #! should be better reimplemented with bitarray directly ALSO YIELD
+        # 1. Gamma encode the length
+        res = self.gamma_encode(length)
+        
+        # 2. Append the binary remainder
+        if length > 1:
+            res.extend(int2ba(number)[1:])
+            
+        return res
+        # bin_num = bin(number)[2:]
+
+        # rem = bin_num[1:]  # remove leading '1'
+        # length = len(bin_num)
+        # gamma_length = self.gamma_encode(length)
+        
+        # return bitarray(gamma_length + rem) #! should be better reimplemented with bitarray directly ALSO YIELD
 
     def varbyte_encode(self, number):
         bin_num = bin(number)[2:] # remove '0b' prefix
@@ -70,15 +101,19 @@ class IndexCompressor:
 
         return bitarray(res) #! should be better reimplemented with bitarray directly ALSO YIELD
 
-    def gamma_decode(self, encoded_bytes): #! use yield
+    def gamma_decode(self, encoded_bytes, verbose=False): #! use yield
 
         ptr = 0
         total_length = len(encoded_bytes)
 
         # if self.removed_tf:
         while ptr < total_length:
+        
+            if verbose and ptr % 1000 == 0 and ptr > 0:
+                percentage = (ptr / total_length) * 100
+                print(f"\rProcessing: {percentage:6.1f}% [{ptr}/{total_length}] | Current pointer: {ptr:<20}", end="", flush=True)
+
             to_read = 0
-            n = total_length - ptr
             
             # 1. Find the first 0 (the end of the unary prefix)
             for i in range(ptr, total_length):
@@ -111,86 +146,113 @@ class IndexCompressor:
 
             yield ba2int(res)
 
-    def delta_decode(self, encoded_bytes): #! use yield
+    def delta_decode(self, encoded_bytes, verbose=False): #! use yield
         #! since we are use yield we cant call gamma decode directly , think about this for reuse of code
-        while len(encoded_bytes) > 0:
+        ptr = 0
+        total_length = len(encoded_bytes)
+
+        while ptr < total_length:
+            
+            if verbose and ptr % 1000 == 0 and ptr > 0:
+                percentage = (ptr / total_length) * 100
+                print(f"\rProcessing: {percentage:6.1f}% [{ptr}/{total_length}] | Current pointer: {ptr:<20}", end="", flush=True)
+            
             to_read = 0
-            n = len(encoded_bytes)
 
             # 1. Find the first 0 (the end of the unary prefix)
-            for i in range(n):
+            for i in range(ptr, total_length):
                 if encoded_bytes[i] == 0:
-                    to_read = i
+                    to_read = i - ptr
                     break
             else:
                 # Break out if no 0 is found to prevent an infinite loop on corrupt data
                 raise ValueError("Invalid delta encoding: no terminating 0 found in unary prefix.")
                 
             # 2. Remove the unary prefix entirely (the 1s and the terminating 0)
-            for _ in range(to_read + 1):
-                encoded_bytes.pop(0)
+            rem_1_start = ptr + to_read + 1
+            rem_1_end = rem_1_start + to_read
             
-            # 3. Create a new bitarray starting with the implicit leading 1
+            if rem_1_end > total_length:
+                raise ValueError("Invalid delta encoding: stream cut off during length remainder extraction.")
+            
+            # Grab the length bits and parse the size of the actual payload
             rem_1 = bitarray([1])
-            
-            # 4. Physically pop the exact number of remainder bits needed
-            for _ in range(to_read):
-                if len(encoded_bytes) > 0: #! could be useless
-                    rem_1.append(encoded_bytes.pop(0))
-            
+            rem_1.extend(encoded_bytes[rem_1_start:rem_1_end])
             remainder_size = ba2int(rem_1) - 1  
 
-            res = bitarray([1])
+            # 4. Calculate where the actual value payload bits are located
+            res_start = rem_1_end
+            res_end = res_start + remainder_size
             
-            # Physically pop the remainder bits needed for the actual value
-            for _ in range(remainder_size):
-                if len(encoded_bytes) > 0:
-                    res.append(encoded_bytes.pop(0))
-                else:
-                    raise ValueError("Invalid delta encoding: stream cut off during remainder extraction.")
-                    
+            if res_end > total_length:
+                raise ValueError("Invalid delta encoding: stream cut off during value remainder extraction.")
+                
+            # Slice out the final payload bits
+            res = bitarray([1])
+            res.extend(encoded_bytes[res_start:res_end])
+            
+            # Advance the pointer all the way past this entire decoded number block
+            ptr = res_end
+
             yield ba2int(res)
 
-    def varbyte_decode(self, encoded_bytes): #! use yield
+    def varbyte_decode(self, encoded_bytes, verbose=False): #! use yield
+        ptr = 0
+        total_length = len(encoded_bytes)
+        last_logged = 0
 
-        while len(encoded_bytes) > 0:
-            first_bit = encoded_bytes.pop(0)
-            current_byte = bitarray()  
-            while first_bit == 0:
-                # Read the next 7 bits for the current byte
-                for _ in range(7):
-                    if len(encoded_bytes) > 0:
-                        current_byte.append(encoded_bytes.pop(0))
-                    else:
-                        raise ValueError("Invalid varbyte encoding: stream cut off during byte extraction.")
+        current_byte = bitarray()  # Accumulates the 7-bit payloads for the current integer
+
+        while ptr < total_length:
+            # Optional: Verbose progress tracking (updates roughly every 1000 bytes / 8000 bits)
+            if verbose and (ptr - last_logged >= 8000) and ptr > 0:
+                percentage = (ptr / total_length) * 100
+                print(f"\rDecoding Varbyte: {percentage:6.1f}% [{ptr}/{total_length} bits]", end="", flush=True)
+                last_logged = ptr
+
+            # Safety check: Every Varbyte segment must contain a full 8-bit block
+            if ptr + 8 > total_length:
+                raise ValueError("Invalid varbyte encoding: stream cut off during byte extraction.")
+
+            # 1. Read the flag bit at the start of the 8-bit block
+            # (0 = continuation byte, 1 = termination byte)
+            first_bit = encoded_bytes[ptr]
+
+            # 2. Slice out the remaining 7 payload bits of this block and append them
+            current_byte.extend(encoded_bytes[ptr + 1 : ptr + 8])
+
+            # 3. Advance the pointer past this entire 8-bit block
+            ptr += 8
+
+            # 4. If the flag bit was 1, the integer is complete
+            if first_bit == 1:
+                yield ba2int(current_byte)
+                current_byte.clear()
+
+        # while len(encoded_bytes) > 0:
+        #     first_bit = encoded_bytes.pop(0)
+        #     current_byte = bitarray()  
+        #     while first_bit == 0:
+        #         # Read the next 7 bits for the current byte
+        #         for _ in range(7):
+        #             if len(encoded_bytes) > 0:
+        #                 current_byte.append(encoded_bytes.pop(0))
+        #             else:
+        #                 raise ValueError("Invalid varbyte encoding: stream cut off during byte extraction.")
                 
-                if len(encoded_bytes) > 0:
-                    first_bit = encoded_bytes.pop(0)
-                else:
-                    raise ValueError("Invalid varbyte encoding: stream cut off after last byte.")
+        #         if len(encoded_bytes) > 0:
+        #             first_bit = encoded_bytes.pop(0)
+        #         else:
+        #             raise ValueError("Invalid varbyte encoding: stream cut off after last byte.")
             
-            for _ in range(7):
-                if len(encoded_bytes) > 0:
-                    current_byte.append(encoded_bytes.pop(0))
-                else:
-                    raise ValueError("Invalid varbyte encoding: stream cut off during last byte extraction.")
+        #     for _ in range(7):
+        #         if len(encoded_bytes) > 0:
+        #             current_byte.append(encoded_bytes.pop(0))
+        #         else:
+        #             raise ValueError("Invalid varbyte encoding: stream cut off during last byte extraction.")
                 
-            yield ba2int(current_byte)
-            current_byte.clear()
-
-        # encoded_str = encoded_bytes.to01()
-        # com_string = ''
-        # for i in range(0, len(encoded_str), 8):
-        #     byte = encoded_str[i:i+8]
-        #     if byte[0] == '0':  # last byte
-        #         com_string += byte[1:]
-        #     else:
-        #         com_string += byte[1:]
-        #         print(f"Varbyte decoding string: {encoded_str}, Byte: {byte}, Result so far: {int(com_string, 2)}")
-        #         yield com_string
-        #         com_string = ''
-
-        # return com_string
+        #     yield ba2int(current_byte)
+        #     current_byte.clear()
 
     def pfor_delta_encode(self, d_gaps, k=4): #! compression given the full d-gap list returns the compressed d-gap list and the outliers
         min_ = min(d_gaps)
