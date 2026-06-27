@@ -1,19 +1,35 @@
 import struct
 from bitarray import bitarray
-from bitarray.util import int2ba, ba2int
+from bitarray.util import int2ba
 
-COMPRESSION_CODES = {
+COMPRESSION_METHODS_ENC = {
     "None": 0,
     "gamma": 1,
     "delta": 2,
     "varbyte": 3,
+    "pfor_delta": 4
 }
 
-COMPRESSION_METHODS = {
+COMPRESSION_METHODS_DEC = {
     0: "None",
     1: "gamma",
     2: "delta",
     3: "varbyte",
+    4: "pfor_delta"
+}
+
+PFOR_DELTA_EXTRA_STRATEGY_ENC = { # strategy for the last block in PForDelta encoding and outliers handling
+    0: "None",
+    1: "gamma",
+    2: "delta",
+    3: "varbyte",
+}
+
+PFOR_DELTA_EXTRA_STRATEGY_DEC = {
+    "None": 0,
+    "gamma": 1,
+    "delta": 2,
+    "varbyte": 3,
 }
 
 MAX_UINT32 = 2**32 - 1
@@ -23,12 +39,15 @@ class IndexStorage:
         self.index_obj = index_obj
         self.file_path = file_path
         # pass
+    
+    def clear_storage(self):
+        self.file_path = None
 
     def set_file_path(self, file_path):
         self.file_path = file_path
     
     def build_header(self):
-        compression_code = COMPRESSION_CODES[self.index_obj.compression_method]
+        compression_code = COMPRESSION_METHODS_ENC[self.index_obj.compression_method]
         header = struct.pack('<IB', compression_code, self.index_obj.removed_tf)
         return header
     
@@ -91,7 +110,7 @@ class IndexStorage:
             
             print(f"Loading index with compression code: {compression_code}, removed_tf_flag: {removed_tf_flag}")
             
-            detected_method = COMPRESSION_METHODS[compression_code]
+            detected_method = COMPRESSION_METHODS_DEC[compression_code]
             # self.index_obj.compression_method = COMPRESSION_METHODS[compression_code]
             self.index_obj.compression_method = "None" #! bc at the end the index will have docids as integers
             self.index_obj.removed_tf = bool(removed_tf_flag)

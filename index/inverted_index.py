@@ -157,7 +157,10 @@ class Index:
         self.compression_method = "None"
         self.removed_tf = False
 
-    def compress_index(self, method="gamma"):
+        self.compressor.clear_compressor()
+        self.storage.clear_storage()
+
+    def compress_index(self, method="gamma", k=8, block_size=128, extra_strategy="None"):
         if self.index is None or len(self.index) == 0:
             raise ValueError("Inverted index is empty. Build the index before applying compression.")
         if self.compression_method != "None":
@@ -166,11 +169,21 @@ class Index:
         methods_map = { #! better way to do this ? 
             "gamma": self.compressor.gamma_encode,
             "delta": self.compressor.delta_encode,
-            "varbyte": self.compressor.varbyte_encode
+            "varbyte": self.compressor.varbyte_encode,
+            "pfor_delta": self.compressor.pfor_delta_encode_bit #!test
         }
 
         if method in methods_map:
             self.compression_method = method
+
+            if method == "pfor_delta":
+                if self.remove_tf:
+                    self.compressor.pfor_delta_k = k
+                    self.compressor.pfor_delta_block_size = block_size
+                    self.compressor.pfor_delta_extra_strategy = extra_strategy
+                else:
+                    raise ValueError("PForDelta compression requires term frequencies to be removed. Please call remove_tf() before applying PForDelta compression.")
+
             self.compressor.apply_index_transformation(methods_map[method])
         else:
             raise ValueError(f"Compression method '{method}' is not supported. Allowed methods: {list(methods_map.keys())}")
@@ -184,7 +197,8 @@ class Index:
         methods_map = {
             "gamma": self.compressor.gamma_decode,
             "delta": self.compressor.delta_decode,
-            "varbyte": self.compressor.varbyte_decode
+            "varbyte": self.compressor.varbyte_decode,
+            "pfor_delta": self.compressor.pfor_delta_decode_bit #! test
         }
 
         if self.compression_method in methods_map:
