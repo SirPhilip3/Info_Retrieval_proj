@@ -1,6 +1,6 @@
 import struct
 from bitarray import bitarray
-from bitarray.util import int2ba
+from bitarray.util import int2ba, ba2int
 
 COMPRESSION_METHODS_ENC = {
     "None": 0,
@@ -47,6 +47,15 @@ class IndexStorage:
         self.file_path = file_path
     
     def build_header(self):
+        if self.index_obj.compression_method == "pfor_delta":
+            extra_strategy_code = PFOR_DELTA_EXTRA_STRATEGY_DEC[self.index_obj.compressor.pfor_delta_extra_strategy]
+            header = struct.pack('<IBBII', 
+                                 COMPRESSION_METHODS_ENC[self.index_obj.compression_method], 
+                                 self.index_obj.removed_tf, 
+                                 extra_strategy_code, 
+                                 self.index_obj.compressor.pfor_delta_k,
+                                 self.index_obj.compressor.pfor_delta_block_size)
+            return header
         compression_code = COMPRESSION_METHODS_ENC[self.index_obj.compression_method]
         header = struct.pack('<IB', compression_code, self.index_obj.removed_tf)
         return header
@@ -70,7 +79,44 @@ class IndexStorage:
                 f.write(struct.pack(f'<{term_len}s', term_bytes))
                 
                 if self.index_obj.removed_tf:
+
                     for doc_id in posting_list:
+                        # print(doc_id.__class__.__name__)
+
+                        if self.index_obj.compression_method == "pfor_delta":
+                            if isinstance(doc_id, tuple) and len(doc_id) == 3:
+                                # print(f"Compressing term: {term}, doc_id: {doc_id}")
+
+                                # f.write(struct.pack('<B', 0))  # Block type indicator for tuple
+                                combined_bits.extend(int2ba(0, length=8))  #! Use 8 bits for the block type indicator
+                                combined_bits.extend(int2ba(doc_id[2], length=32))  
+                                combined_bits.extend(doc_id[0])
+                                for item in doc_id[1]:
+                                    if isinstance(item, int):
+                                        print(f"Compressing term: {term}, doc_id: {doc_id}, item: {item} (as int)")
+                                        bits_item = int2ba(item, length=32)
+                                        combined_bits.extend(bits_item)
+                                    else:
+                                        combined_bits.extend(item)
+                            elif isinstance(doc_id, list):
+
+                                # f.write(struct.pack('<B', 1))  # Block type indicator for list
+                                print(f"Compressing term: {term}, doc_id: {doc_id} (as list)")
+                                combined_bits.extend(int2ba(1, length=8)) #! use less bits for the block type indicator
+
+                                for item in doc_id:
+                                    if isinstance(item, int):
+                                        # print(f"Compressing term: {term}, doc_id: {doc_id}, item: {item} (as int)")
+                                        bits_item = int2ba(item, length=32)
+                                        combined_bits.extend(bits_item)
+                                    else:
+                                        combined_bits.extend(item) 
+                            else:
+                                # print(f"Compressing term: {term}, doc_id: {doc_id}")
+                                combined_bits.extend(int2ba(1, length=8))
+                                combined_bits.extend(doc_id)
+                            
+                            continue  # Skip the rest of the loop since we've already processed the PForDelta blocks
 
                         if isinstance(doc_id, int):
                             combined_bits.extend(int2ba(doc_id, length=32))  # Convert integer to bitarray of fixed length
@@ -128,7 +174,8 @@ class IndexStorage:
             "None" : self.index_obj.compressor.no_decompression,
             "gamma": self.index_obj.compressor.gamma_decode,
             "delta": self.index_obj.compressor.delta_decode,
-            "varbyte": self.index_obj.compressor.varbyte_decode
+            "varbyte": self.index_obj.compressor.varbyte_decode,
+            "pfor_delta": None
         }
 
         if decompression_method not in decomp_methods_map:
@@ -136,7 +183,11 @@ class IndexStorage:
         
         decomp_func = decomp_methods_map[decompression_method]
 
-        moch_term = 0 #! important change to real terms from file
+        if decompression_method == "pfor_delta":
+            extra_strategy_code = struct.unpack('<B', index_data.read(1))[0]
+            self.index_obj.compressor.pfor_delta_extra_strategy = PFOR_DELTA_EXTRA_STRATEGY_ENC[extra_strategy_code]
+            self.index_obj.compressor.pfor_delta_k = struct.unpack('<I', index_data.read(4))[0]
+            self.index_obj.compressor.pfor_delta_block_size = struct.unpack('<I', index_data.read(4))[0]
 
         while True:
             term_len_bytes = index_data.read(4)
@@ -147,7 +198,8 @@ class IndexStorage:
             term_bytes = index_data.read(term_len)
             if not term_bytes:
                 break # Clean End of File reached
-
+            
+            print(f"Reading term of length {term_len} bytes: {term_bytes}")
             term = term_bytes.decode('utf-8') #! important change to real terms from file
 
             size_bytes = index_data.read(4)
@@ -157,7 +209,6 @@ class IndexStorage:
             pl_size = struct.unpack('<I', size_bytes)[0] # [0] since unpack returns a tuple
             
             # print(f"Decompressing term: {moch_term}, Posting list size: {pl_size}, Reading: {index_data.tell()} bytes")
-            # term = str(moch_term) #! important change to real terms from file
             self.index_obj.index[term] = []
 
             byte_length = (pl_size + 7) // 8
@@ -168,6 +219,64 @@ class IndexStorage:
             
             # 2. Slice off the trailing padding bits required by the filesystem
             bits = bits[:pl_size] 
+
+            if decompression_method == "pfor_delta":
+                extra_decomp_function = decomp_methods_map[self.index_obj.compressor.pfor_delta_extra_strategy]
+                while len(bits) > 0:
+
+                    # block_type_indicator = index_data.read(1)
+                    # block_type_indicator = struct.unpack('<B', block_type_indicator)[0]  # Unpack the first bit to determine the block type
+                    if len(bits) < 8:  # Safety check for trailing padding bits
+                        break
+                        
+                    block_type_indicator = ba2int(bits[:8])  # Read the 8-bit indicator
+                    # print(f"Block type indicator for term '{term}': {block_type_indicator}, Remaining bits: {len(bits)}")
+                    del bits[:8]
+                    # del bits[0]  # Remove the block type indicator bit
+
+                    if block_type_indicator == 1:  # Last block
+                        # Handle the last block with the extra strategy
+                        # print(f"Processing last block for term: {term}, Remaining bits: {len(bits)}")
+                        final_doc_ids = extra_decomp_function(bits)
+                        for doc_id in final_doc_ids:
+                            self.index_obj.index[term].append(doc_id)  # Assuming doc_id is already a bitarray
+                        break
+
+                    min_value = ba2int(bits[:32])
+                    del bits[:32]
+                    
+                    k = self.index_obj.compressor.pfor_delta_k
+                    
+                    block_size = self.index_obj.compressor.pfor_delta_block_size * k
+
+                    # print(f"Processing block for term: {term}, Remaining bits: {len(bits)}, Block size: {block_size}, k: {k}, min_value: {min_value}")
+
+                    block = bits[:block_size]
+                    del bits[:block_size] # remove the processed block from bits
+                    
+                    chunks = [block[i : i + k] for i in range(0, len(block), k)]
+
+                    outlier_count = 0 
+                    outlier_positions = []
+                    outliers = []
+                    for i, chunk in enumerate(chunks):
+                        if chunk.count(1) == self.index_obj.compressor.pfor_delta_k:
+                            outlier_count += 1
+                            outlier_positions.append(i)
+                        
+                        outliers.append(ba2int(chunk)+min_value)  # Convert the chunk to an integer to ensure it's valid
+
+
+                    outlier_generator = extra_decomp_function(bits)
+                    # count = 0
+                    if outlier_count > 0:
+                        for count in range(outlier_count):
+                            el = next(outlier_generator)
+                            outliers[outlier_positions[count]] = el + min_value
+                    
+                    self.index_obj.index[term].extend(outliers)
+                
+                continue  # Skip the rest of the loop since we've already processed the PForDelta blocks
             
             if self.index_obj.removed_tf:
                 for doc_id in decomp_func(bits):
@@ -179,6 +288,3 @@ class IndexStorage:
                 for doc_id, tf in zip(iterator, iterator):
                     self.index_obj.index[term].append((doc_id, tf))
                 
-            moch_term += 1
-
-        # return self.index #! useless

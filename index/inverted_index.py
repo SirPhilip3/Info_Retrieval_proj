@@ -177,7 +177,7 @@ class Index:
             self.compression_method = method
 
             if method == "pfor_delta":
-                if self.remove_tf:
+                if self.removed_tf:
                     self.compressor.pfor_delta_k = k
                     self.compressor.pfor_delta_block_size = block_size
                     self.compressor.pfor_delta_extra_strategy = extra_strategy
