@@ -251,6 +251,42 @@ class Index:
                 else:
                     doc_id_bits += num_postings * 32
                     tf_bits += num_postings * 32
+                    
+            elif self.compression_method == "pfor_delta":
+                for element in posting_list:
+                    # Case 1: Compressed PForDelta Block/Remainder Tuple
+                    if isinstance(element, tuple):
+                        doc_id_s, outliers, min_val = element
+                        
+                        # Count bits of the main packed bitarray
+                        if hasattr(doc_id_s, 'len'):
+                            doc_id_bits += doc_id_s.len()
+                        
+                        # Count bits from the list of outlier bitarrays
+                        if isinstance(outliers, list):
+                            for outlier in outliers:
+                                if hasattr(outlier, 'len'):
+                                    doc_id_bits += outlier.len()
+                                else:
+                                    # Fallback if outlier is represented as raw int
+                                    doc_id_bits += 32 
+                        
+                        # Account for storing the frame of reference base / min value
+                        # Assuming standard 32-bit integer for the base value
+                        doc_id_bits += 32
+
+                    # Case 2: Trailing raw standalone bitarray
+                    elif hasattr(element, 'len'):
+                        doc_id_bits += element.len()
+
+                    # Case 3: Fallback list of raw integers (not enough docIDs for a block)
+                    elif isinstance(element, list):
+                        # Each raw integer takes 32 bits under standard compression rules
+                        doc_id_bits += len(element) * 32
+                        
+                    # Case 4: Single fallback raw integer (if any)
+                    elif isinstance(element, int):
+                        doc_id_bits += 32
             else:
                 for posting in posting_list:
                     if self.removed_tf:
