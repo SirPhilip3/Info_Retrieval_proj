@@ -170,12 +170,12 @@ class IndexStorage:
     
     def decompress_index_from_file(self, index_data, decompression_method):
 
-        decomp_methods_map = { 
+        decomp_methods_map = { # also used for extra decompression strategy in PForDelta
             "None" : self.index_obj.compressor.no_decompression,
             "gamma": self.index_obj.compressor.gamma_decode,
             "delta": self.index_obj.compressor.delta_decode,
             "varbyte": self.index_obj.compressor.varbyte_decode,
-            "pfor_delta": None
+            "pfor_delta": None # we do it in place here
         }
 
         if decompression_method not in decomp_methods_map:
@@ -256,7 +256,7 @@ class IndexStorage:
                     
                     chunks = [block[i : i + k] for i in range(0, len(block), k)]
 
-                    outlier_count = 0 
+                    outlier_count = 0 #!uselessuse len outlierpos
                     outlier_positions = []
                     outliers = []
                     for i, chunk in enumerate(chunks):

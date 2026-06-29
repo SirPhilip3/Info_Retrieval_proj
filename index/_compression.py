@@ -123,18 +123,6 @@ class IndexCompressor:
             except ValueError:
                 # Break out if no 0 is found to prevent an infinite loop on corrupt data
                 raise ValueError("Invalid gamma encoding: no terminating 0 found in unary prefix.")
-
-            # to_read = 0
-            
-            # # 1. Find the first 0 (the end of the unary prefix)
-            # for i in range(ptr, total_length):
-            #     if encoded_bytes[i] == 0:
-            #         to_read = i - ptr
-            #         break
-            # else:
-            #     # Break out if no 0 is found to prevent an infinite loop on corrupt data
-            #     raise ValueError("Invalid gamma encoding: no terminating 0 found in unary prefix.")
-                
             
             remainder_start = to_read + 1
             remainder_end = remainder_start + to_read
@@ -176,43 +164,6 @@ class IndexCompressor:
             
             # 5. Physically slice off the consumed value payload bits
             del encoded_bytes[:remainder_size]
-            
-            # to_read = 0
-
-            # # 1. Find the first 0 (the end of the unary prefix)
-            # for i in range(ptr, total_length):
-            #     if encoded_bytes[i] == 0:
-            #         to_read = i - ptr
-            #         break
-            # else:
-            #     # Break out if no 0 is found to prevent an infinite loop on corrupt data
-            #     raise ValueError("Invalid delta encoding: no terminating 0 found in unary prefix.")
-                
-            # # 2. Remove the unary prefix entirely (the 1s and the terminating 0)
-            # rem_1_start = ptr + to_read + 1
-            # rem_1_end = rem_1_start + to_read
-            
-            # if rem_1_end > total_length:
-            #     raise ValueError("Invalid delta encoding: stream cut off during length remainder extraction.")
-            
-            # # Grab the length bits and parse the size of the actual payload
-            # rem_1 = bitarray([1])
-            # rem_1.extend(encoded_bytes[rem_1_start:rem_1_end])
-            # remainder_size = ba2int(rem_1) - 1  
-
-            # # 4. Calculate where the actual value payload bits are located
-            # res_start = rem_1_end
-            # res_end = res_start + remainder_size
-            
-            # if res_end > total_length:
-            #     raise ValueError("Invalid delta encoding: stream cut off during value remainder extraction.")
-                
-            # # Slice out the final payload bits
-            # res = bitarray([1])
-            # res.extend(encoded_bytes[res_start:res_end])
-            
-            # # Advance the pointer all the way past this entire decoded number block
-            # ptr = res_end
 
             yield ba2int(res)
 
@@ -379,10 +330,16 @@ class IndexCompressor:
 
             self.index_obj.index[term] = compressed_term_data
     
-    def no_decompression(self, encoded_bytes):
-        ptr = 0
+    def no_decompression(self, encoded_bytes, verbose=False): 
+        # ptr = 0
         total_length = len(encoded_bytes)
-        while ptr < total_length:
-            number = ba2int(encoded_bytes[ptr:ptr+32])  # Assuming 32 bits for each integer
-            ptr += 32
+        while len(encoded_bytes) > 0:
+
+            remaining_length = len(encoded_bytes)
+            if verbose and remaining_length % 1000 == 0:
+                percentage = (remaining_length / total_length) * 100
+                print(f"\rProcessing: {percentage:6.1f}% [{remaining_length}/{total_length}]", end="", flush=True)
+
+            number = ba2int(encoded_bytes[:32])  # Assuming 32 bits for each integer
+            del encoded_bytes[:32]  # Remove the processed bits
             yield number
