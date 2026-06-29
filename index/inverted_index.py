@@ -169,7 +169,7 @@ class Index:
         if self.index is None or len(self.index) == 0:
             raise ValueError("Inverted index is empty. Build the index before applying compression.")
         if self.compression_method != "None":
-            raise ValueError("Index is already compressed with method '{self.compression_method}'. Clear the index before applying new compression.")
+            raise ValueError(f"Index is already compressed with method '{self.compression_method}'. Clear the index before applying new compression.")
 
         methods_map = { #! better way to do this ? 
             "gamma": self.compressor.gamma_encode,
@@ -278,7 +278,7 @@ class Index:
                 doc_ids.add(doc_id)
         return sorted(doc_ids)
     
-    def get_approx_size(self, include_term_bytes=False):
+    def get_approx_size(self, include_term_bytes=False, verbose = False):
         if include_term_bytes:
             raise NotImplementedError("Term byte size calculation is not implemented yet.")
 
@@ -347,12 +347,12 @@ class Index:
             "total_bits": total_bits,
             "total_bytes": total_bits / 8,
         }
-
-        print("\n=== Index Size Breakdown ===")
-        print(f"Doc ID bits:  {doc_id_bits:,}")
-        print(f"TF bits:      {tf_bits:,}")
-        print(f"Total bits:   {total_bits:,}")
-        print(f"Total bytes:  {total_bits / 8:,.2f}")
+        if verbose:
+            print("\n=== Index Size Breakdown ===")
+            print(f"Doc ID bits:  {doc_id_bits:,}")
+            print(f"TF bits:      {tf_bits:,}")
+            print(f"Total bits:   {total_bits:,}")
+            print(f"Total bytes:  {total_bits / 8:,.2f}")
 
         return result
     
