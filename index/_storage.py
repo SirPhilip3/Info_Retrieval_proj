@@ -49,15 +49,16 @@ class IndexStorage:
     def build_header(self):
         if self.index_obj.compression_method == "pfor_delta":
             extra_strategy_code = PFOR_DELTA_EXTRA_STRATEGY_DEC[self.index_obj.compressor.pfor_delta_extra_strategy]
-            header = struct.pack('<IBBII', 
+            header = struct.pack('<IBBIII', 
                                  COMPRESSION_METHODS_ENC[self.index_obj.compression_method], 
-                                 self.index_obj.removed_tf, 
+                                 self.index_obj.removed_tf,
+                                 self.index_obj.d_gap_index_, 
                                  extra_strategy_code, 
                                  self.index_obj.compressor.pfor_delta_k,
                                  self.index_obj.compressor.pfor_delta_block_size)
             return header
         compression_code = COMPRESSION_METHODS_ENC[self.index_obj.compression_method]
-        header = struct.pack('<IB', compression_code, self.index_obj.removed_tf)
+        header = struct.pack('<IBB', compression_code, self.index_obj.removed_tf, self.index_obj.d_gap_index_)
         return header
     
     def write_to_disk(self):
@@ -151,15 +152,16 @@ class IndexStorage:
 
         with open(self.file_path, 'rb') as f:
 
-            header = f.read(5)  
-            compression_code, removed_tf_flag = struct.unpack('<IB', header)
+            header = f.read(6)  
+            compression_code, removed_tf_flag, d_gap_index_flag = struct.unpack('<IBB', header)
             
-            print(f"Loading index with compression code: {compression_code}, removed_tf_flag: {removed_tf_flag}")
+            print(f"Loading index with compression code: {compression_code}, removed_tf_flag: {removed_tf_flag}, d_gap_index_flag: {d_gap_index_flag}")
             
             detected_method = COMPRESSION_METHODS_DEC[compression_code]
             # self.index_obj.compression_method = COMPRESSION_METHODS[compression_code]
             self.index_obj.compression_method = "None" #! bc at the end the index will have docids as integers
             self.index_obj.removed_tf = bool(removed_tf_flag)
+            self.index_obj.d_gap_index_ = bool(d_gap_index_flag)
 
             self.decompress_index_from_file(f, detected_method)  # Implement this method to parse and load the index data
 

@@ -14,6 +14,8 @@ class Index:
         self.compression_method = "None"
         self.removed_tf = False
 
+        self.d_gap_index_ = False
+
         # self.compression_function = None
         # self.decompression_function = None
 
@@ -22,9 +24,10 @@ class Index:
 
     def build_index(self, dataset, my_tokenizer, d_gap=False, max_num_docs=1001):
         if d_gap:
-            return self.d_gap_index(dataset, my_tokenizer, max_num_docs)
+            self.d_gap_index_ = True
+            self.d_gap_index(dataset, my_tokenizer, max_num_docs)
         else:
-            return self.simple_index(dataset, my_tokenizer, max_num_docs)
+            self.simple_index(dataset, my_tokenizer, max_num_docs)
 
     def simple_index(self, dataset, my_tokenizer, max_num_docs=1001):
         count_docs = 0      # number of docs
@@ -157,6 +160,8 @@ class Index:
         self.compression_method = "None"
         self.removed_tf = False
 
+        self.d_gap_index_ = False
+
         self.compressor.clear_compressor()
         self.storage.clear_storage()
 
@@ -206,6 +211,44 @@ class Index:
             self.compression_method = "None"  # Reset compression method after decompression
         else:
             raise ValueError(f"Decompression method '{self.compression_method}' is not supported. Allowed methods: {list(methods_map.keys())}")
+        
+    def to_dgaps(self):
+        if self.d_gap_index_:
+            raise ValueError("The index is a d-gap index. Cannot perform d-gap serialization.")
+    
+        self.d_gap_index_ = True
+
+        for term, posting_list in self.index.items():
+            current_doc_id = 0
+            
+            if self.removed_tf:
+                for i, doc_id in enumerate(posting_list):
+                    d_gap = doc_id - current_doc_id
+                    self.index[term][i] = d_gap
+                    current_doc_id = doc_id
+            else:
+                for i, (doc_id, tf) in enumerate(posting_list):
+                    d_gap = doc_id - current_doc_id
+                    self.index[term][i] = (d_gap, tf)
+                    current_doc_id = doc_id
+
+    def from_dgaps(self):
+        if not self.d_gap_index_:
+            raise ValueError("The index is not a d-gap index. Cannot perform d-gap deserialization.")
+    
+        self.d_gap_index_ = False
+
+        for term, posting_list in self.index.items():
+            current_doc_id = 0
+            
+            if self.removed_tf:
+                for i, d_gap in enumerate(posting_list):
+                    current_doc_id += d_gap
+                    self.index[term][i] = current_doc_id
+            else:
+                for i, (d_gap, tf) in enumerate(posting_list):
+                    current_doc_id += d_gap
+                    self.index[term][i] = (current_doc_id, tf)
 
     def get_terms(self):
         return self.index.keys()
