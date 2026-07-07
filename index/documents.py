@@ -18,7 +18,8 @@ def load_dataset(DATASET_NAME):
     """
 
     if DATASET_NAME == "rcv1":
-        dataset = fetch_rcv1()
+        # dataset = fetch_rcv1()
+        raise ValueError(f"Dataset {DATASET_NAME} not supported") 
     else:
         try:
             dataset = ir_datasets.load(DATASET_NAME)

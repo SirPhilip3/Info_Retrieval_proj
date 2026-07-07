@@ -102,21 +102,21 @@ def stream_cluster(SortedCollection, Radius, k):
     """
 
 
-    C = []                       # Lista dei doc_id dei medoidi
-    medoid_sets = {}             # medoid_id -> set di termini
-    Clusters = defaultdict(list) # medoid_id -> lista di doc_id appartenenti a quel cluster
+    C = []                       # Medoids list
+    medoid_sets = {}             # medoid_id -> terms set of that medoid
+    Clusters = defaultdict(list) # medoid_id -> list of doc_id belong to the same cluster
 
     for doc_id, doc_terms in SortedCollection.items():
         set_d = set(doc_terms)
         
-        # Se non ci sono ancora medoidi, il primo documento lo diventa di diritto
+        # If there are no medoids yet, create the first cluster with this document as the medoid
         if not C:
             C.append(doc_id)
             medoid_sets[doc_id] = set_d
             Clusters[doc_id].append(doc_id)
             continue
 
-        # Calcolo delle distanze da tutti i medoidi correnti
+        # Calculate distances from all current medoids
         distances = []
         for c in C:
             centroid_set = medoid_sets[c]
@@ -125,21 +125,22 @@ def stream_cluster(SortedCollection, Radius, k):
             jaccard_dist = 1 - (intersection / union) if union > 0 else 1
             distances.append(jaccard_dist)
         
-        # Trova il medoide più vicino
+        # Find the closest medoid
         min_idx = np.argmin(distances)
         dist_c = distances[min_idx]
         closest_medoid = C[min_idx]
 
-        # Se è abbastanza vicino OPPURE abbiamo raggiunto il numero massimo di cluster k
+        # If it is close enough OR we have reached the maximum number of clusters k
         if dist_c < Radius or len(C) >= k:
             Clusters[closest_medoid].append(doc_id)
         else:
-            # Crea un nuovo cluster con questo documento come medoide
+            # Create a new cluster with this document as the medoid
             C.append(doc_id)
             medoid_sets[doc_id] = set_d
             Clusters[doc_id].append(doc_id)
             
-    return C, Clusters
+    return C,Clusters
+
 
 
 def calculate_distance_matrix(medoid_vectors, method="euclidean"):
@@ -159,24 +160,26 @@ def calculate_distance_matrix(medoid_vectors, method="euclidean"):
         return pairwise_distances(medoid_vectors, metric="cosine")
     elif method == "jaccard":
         return pairwise_distances((medoid_vectors > 0).astype(np.uint8), metric="jaccard")
-        # #  calculate only the upper triangular matrix
-        # n = len(medoid_vectors)
-        # dist = np.zeros((n, n))
-        
-        # # Trasformiamo in set una volta sola prima dei cicli
-        # sets = [set(v) for v in medoid_vectors]
+    elif method == "jaccard_optimized":
 
-        # for i in range(n):
-        #     for j in range(i + 1, n):  # Parte da i+1 per sfruttare la simmetria
-        #         intersection = len(sets[i].intersection(sets[j]))
-        #         union = len(sets[i].union(sets[j]))
+        #  calculate only the upper triangular matrix
+        n = len(medoid_vectors)
+        dist = np.zeros((n, n))
+        
+        # Trasformiamo in set una volta sola prima dei cicli
+        sets = [set(v) for v in medoid_vectors]
+
+        for i in range(n):
+            for j in range(i + 1, n):  # Parte da i+1 per sfruttare la simmetria
+                intersection = len(sets[i].intersection(sets[j]))
+                union = len(sets[i].union(sets[j]))
                 
-        #         jaccard_dist = 1 - (intersection / union) if union > 0 else 1
+                jaccard_dist = 1 - (intersection / union) if union > 0 else 1
                 
-        #         dist[i][j] = jaccard_dist
-        #         dist[j][i] = jaccard_dist  # Specchia il risultato
+                dist[i][j] = jaccard_dist
+                dist[j][i] = jaccard_dist  # Specchia il risultato
                 
-        # return dist
+        return dist
     
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -202,9 +205,55 @@ def tsp_path(dist_matrix, verbose=False):
 
     return tsp_path
 
-
+# def stream_cluster(SortedCollection, Radius, k): 
+#     """
+#     Versione modificata per mantenere gli indici posizionali (0, 1, 2...) 
+#     compatibili con la matrice delle distanze e il codice TSP esistente.
+#     """
+#     C_ids = []               # Lista dei REALI doc_id dei medoidi (es: ['doc_42', 'doc_99'])
+#     medoid_sets = []         # Lista dei set di termini (l'indice corrisponde alla posizione nella matrice)
     
-# def reorder_documents_by_tsp(document_clusters, medoids, tsp_path):
+#     # I cluster ora usano come chiave l'INDICE POSIZIONALE (0, 1, 2...) e non il doc_id reale
+#     Clusters = defaultdict(list) 
+
+#     for doc_id, doc_terms in SortedCollection.items():
+#         set_d = set(doc_terms)
+        
+#         # Se non ci sono ancora medoidi, crea il primo (indice 0)
+#         if not C_ids:
+#             C_ids.append(doc_id)
+#             medoid_sets.append(set_d)
+#             Clusters[0].append(doc_id)
+#             continue
+
+#         # Calcola le distanze usando l'indice posizionale 'idx'
+#         distances = []
+#         for idx in range(len(C_ids)):
+#             centroid_set = medoid_sets[idx]
+#             intersection = len(centroid_set.intersection(set_d))
+#             union = len(centroid_set.union(set_d))
+#             jaccard_dist = 1 - (intersection / union) if union > 0 else 1
+#             distances.append(jaccard_dist)
+        
+#         # Trova il medoide più vicino (min_idx sarà 0, 1, 2...)
+#         min_idx = np.argmin(distances)
+#         dist_c = distances[min_idx]
+
+#         # Se è vicino OR abbiamo raggiunto il tetto massimo k
+#         if dist_c < Radius or len(C_ids) >= k:
+#             # Assegna al cluster usando l'indice posizionale
+#             Clusters[min_idx].append(doc_id)
+#         else:
+#             # Crea un nuovo medoide (il suo indice sarà il vecchio len(C_ids))
+#             new_idx = len(C_ids)
+#             C_ids.append(doc_id)
+#             medoid_sets.append(set_d)
+#             Clusters[new_idx].append(doc_id)
+            
+#     # Restituiamo medoid_sets (lista di set per la distanza) e C_ids come terzo parametro
+#     return medoid_sets, Clusters, C_ids
+    
+# def reorder_documents_by_tsp_stream_cluster(document_clusters, medoids, tsp_path):
 #     """
 #     Reorder documents by cluster order induced by TSP over medoids.
 #     Inside each cluster, keep documents in their original order (row order).
@@ -237,13 +286,11 @@ def tsp_path(dist_matrix, verbose=False):
 def reorder_documents_by_tsp(tsp_path, cluster, C):
     tot = []
     for i in tsp_path:
-        # 1. Recuperiamo il vero DocID del medoide usando l'indice del TSP
+        # retrieve the real DocID of the medoid using the TSP index
         medoid_id = C[i] 
         
-        # 2. Accediamo al dizionario dei cluster usando il DocID del medoide
         docs = cluster.get(medoid_id, [])
         
-        # 3. Aggiungiamo tutti i documenti di questo cluster alla lista finale
         for d in docs:  
             tot.append(d)
         

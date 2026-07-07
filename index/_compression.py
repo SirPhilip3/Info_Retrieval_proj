@@ -23,7 +23,6 @@ class IndexCompressor:
         
         for term, posting_list in self.index_obj.index.items():
 
-            # we need to do this since pfor_delta_encode_bit and pfor_delta_decode_bit are not standard functions and require special handling
             
             compressed_postings = []
 
@@ -52,12 +51,12 @@ class IndexCompressor:
         if number <= 0:
             raise ValueError("Gamma encoding requires positive integers.")
             
-        length = number.bit_length()  # Fast O(1) way to find binary length
+        length = number.bit_length()  
         
-        # 1. Unary prefix for (length - 1)
+        
         res = self.transform_unary(length - 1)
         
-        # 2. Append the binary remainder (all bits after the leading 1)
+        
         if length > 1:
             res.extend(int2ba(number)[1:])
 
@@ -71,10 +70,9 @@ class IndexCompressor:
             
         length = number.bit_length()
         
-        # 1. Gamma encode the length
+        
         res = self.gamma_encode(length)
         
-        # 2. Append the binary remainder
         if length > 1:
             res.extend(int2ba(number)[1:])
             
@@ -87,7 +85,7 @@ class IndexCompressor:
         chunks = []
         is_first = True
         
-        # Extract 7-bit blocks from right to left using fast bitwise shifts
+        
         while number > 0:
             chunk = number & 0x7F  # Get lower 7 bits
             
@@ -99,16 +97,14 @@ class IndexCompressor:
             number >>= 7  # Shift right by 7 bits
             is_first = False
 
-        # Since we went right-to-left (LSB to MSB), reverse chunks into a final bitarray
         res = bitarray()
         for block in reversed(chunks):
             res.extend(block)
             
         return res
 
-    def gamma_decode(self, encoded_bytes, verbose=False): #! use yield
+    def gamma_decode(self, encoded_bytes, verbose=False): 
 
-        # ptr = 0
         total_length = len(encoded_bytes)
 
         while len(encoded_bytes) > 0:
@@ -121,7 +117,7 @@ class IndexCompressor:
             try :
                 to_read = encoded_bytes.index(0)  # Find the first 0 (end of unary prefix)
             except ValueError:
-                # Break out if no 0 is found to prevent an infinite loop on corrupt data
+               
                 raise ValueError("Invalid gamma encoding: no terminating 0 found in unary prefix.")
             
             remainder_start = to_read + 1
@@ -130,14 +126,12 @@ class IndexCompressor:
             res = bitarray([1])
             res.extend(encoded_bytes[remainder_start:remainder_end])  # Add the remainder bits
             
-            # ptr = remainder_end  # Move the pointer past the remainder bits
+           
             del encoded_bytes[:remainder_end]  # Remove the processed bits from the front of the list
 
             yield ba2int(res)
 
-    def delta_decode(self, encoded_bytes, verbose=False): #! use yield
-        #! since we are use yield we cant call gamma decode directly , think about this for reuse of code
-        # ptr = 0
+    def delta_decode(self, encoded_bytes, verbose=False): 
         total_length = len(encoded_bytes)
         gamme_gen = self.gamma_decode(encoded_bytes, verbose=verbose)  # Create a generator for gamma decoding
 
@@ -158,19 +152,19 @@ class IndexCompressor:
             if len(encoded_bytes) < remainder_size:
                 raise ValueError("Invalid delta encoding: stream cut off during value remainder extraction.")
             
-            # 4. Slice out the final payload bits
+            
             res = bitarray([1])
             res.extend(encoded_bytes[:remainder_size])
             
-            # 5. Physically slice off the consumed value payload bits
+            
             del encoded_bytes[:remainder_size]
 
             yield ba2int(res)
 
-    def varbyte_decode(self, encoded_bytes, verbose=False): #! use yield
-        # ptr = 0
+    def varbyte_decode(self, encoded_bytes, verbose=False): 
+  
         total_length = len(encoded_bytes)
-        # last_logged = 0
+
 
         current_byte = bitarray()  # Accumulates the 7-bit payloads for the current integer
 
@@ -184,26 +178,25 @@ class IndexCompressor:
                 percentage = (remaining_length / total_length) * 100
                 print(f"\rProcessing: {percentage:6.1f}% [{remaining_length}/{total_length}]", end="", flush=True)
 
-            # 1. Read the flag bit and the payload chunks
+            
             first_bit = encoded_bytes[0]
             current_byte.extend(encoded_bytes[1:8])
 
-            # 2. Chop off the 8 bits we just processed
+           
             del encoded_bytes[:8]
 
-            # 3. If the flag bit is 1, the integer payload assembly is complete
+            
             if first_bit == 1:
                 yield ba2int(current_byte)
                 current_byte.clear()
 
-    def pfor_delta_encode_bit(self, d_gaps, k=8, extra_strategy=None): #! compression given the full d-gap list returns the compressed d-gap list and the outliers
+    def pfor_delta_encode_bit(self, d_gaps, k=8, extra_strategy=None): 
         if not d_gaps:
             raise ValueError("Input d_gaps list is empty.")
     
         min_ = min(d_gaps)
         outliers = []
         
-        # Initialize an empty bit array
         compressed_bits = bitarray()
         
         escape_value = (1 << k) - 1
@@ -219,15 +212,13 @@ class IndexCompressor:
             else:
                 # int2ba converts an integer directly to a bitarray of length k
                 compressed_bits.extend(int2ba(var, length=k))
-                
-        # To get raw bytes for saving to a file or transmitting:
-        # return compressed_bits.tobytes(), outliers, min_
+
         return compressed_bits, outliers, min_
 
     def pfor_delta_decode_bit(self, compressed_bits, outliers, min_val, k=8, decode_fallback=None):
 
         decoded = []
-        # outlier_index = 0
+     
         escape_value = (1 << k) - 1
         
         outlier_stream = iter(outliers)
@@ -237,7 +228,7 @@ class IndexCompressor:
             # Extract a k-bit chunk
             bit_slice = compressed_bits[i : i + k]
             
-            # Guard clause: Ignore trailing padding bits that don't make a full k-bit chunk
+
             if len(bit_slice) < k:
                 break
                 
@@ -255,7 +246,6 @@ class IndexCompressor:
                     outlier_value = next(outlier_gen)
                     
                 decoded.append(outlier_value + min_val)
-                # outlier_index += 1
             else:
                 # Standard value, add the baseline
                 decoded.append(val + min_val)
@@ -276,14 +266,11 @@ class IndexCompressor:
 
         for term, posting_list in self.index_obj.index.items():
 
-            # ----------------------------------------
-            # DECOMPRESSION LOGIC
-            # ----------------------------------------
             if is_decompressing:
                 full_decoded_list = []
                 
                 for block in posting_list:
-                    # Detect PForDelta: It's always a tuple of 3 items
+                    
                     if isinstance(block, tuple):
                         compressed_bits, outliers, min_val = block
                         decoded_block = self.pfor_delta_decode_bit(
@@ -291,7 +278,7 @@ class IndexCompressor:
                         )
                         full_decoded_list.extend(decoded_block)
                     
-                    # Detect Fallback: It's just a raw bitarray/bytes object
+                    
                     else:
                         decoded_block = list(decode_fallback(block))
                         full_decoded_list.extend(decoded_block)
@@ -299,14 +286,12 @@ class IndexCompressor:
                 self.index_obj.index[term] = full_decoded_list
                 continue
 
-            # ----------------------------------------
-            # COMPRESSION LOGIC
-            # ----------------------------------------
+
             d_gap_blocks = [posting_list[i : i + self.pfor_delta_block_size] for i in range(0, len(posting_list), self.pfor_delta_block_size)]
             compressed_term_data = []
 
             for block in d_gap_blocks:
-                # Handle leftover block with fallback
+                
                 if len(block) < self.pfor_delta_block_size:
                     if strategy == "None":
                         # Store the raw, uncompressed list of integers directly
@@ -317,21 +302,19 @@ class IndexCompressor:
                             # print(f"Encoding fallback value: {val} for term: {term} using strategy: {strategy} block length: {len(block)}")
                             fallback_bits.extend(encode_fallback(val))
                         
-                        # Store ONLY the raw bitarray
                         compressed_term_data.append(fallback_bits)
                     continue
 
-                # Handle full block with PForDelta
                 # print(f"Encoding full block for term: {term} with PForDelta, block size: {len(block)}")
                 pfor_tuple = self.pfor_delta_encode_bit(block, self.pfor_delta_k, extra_strategy=encode_fallback)
                 
-                # Store ONLY the 3-element tuple
+              
                 compressed_term_data.append(pfor_tuple)
 
             self.index_obj.index[term] = compressed_term_data
     
     def no_decompression(self, encoded_bytes, verbose=False): 
-        # ptr = 0
+        
         total_length = len(encoded_bytes)
         while len(encoded_bytes) > 0:
 
@@ -340,6 +323,6 @@ class IndexCompressor:
                 percentage = (remaining_length / total_length) * 100
                 print(f"\rProcessing: {percentage:6.1f}% [{remaining_length}/{total_length}]", end="", flush=True)
 
-            number = ba2int(encoded_bytes[:32])  # Assuming 32 bits for each integer
+            number = ba2int(encoded_bytes[:32])  
             del encoded_bytes[:32]  # Remove the processed bits
             yield number

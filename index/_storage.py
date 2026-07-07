@@ -88,8 +88,7 @@ class IndexStorage:
                             if isinstance(doc_id, tuple) and len(doc_id) == 3:
                                 # print(f"Compressing term: {term}, doc_id: {doc_id}")
 
-                                # f.write(struct.pack('<B', 0))  # Block type indicator for tuple
-                                combined_bits.extend(int2ba(0, length=8))  #! Use 8 bits for the block type indicator
+                                combined_bits.extend(int2ba(0, length=8))  
                                 combined_bits.extend(int2ba(doc_id[2], length=32))  
                                 combined_bits.extend(doc_id[0])
                                 for item in doc_id[1]:
@@ -101,10 +100,9 @@ class IndexStorage:
                                         combined_bits.extend(item)
                             elif isinstance(doc_id, list):
 
-                                # f.write(struct.pack('<B', 1))  # Block type indicator for list
+                                
                                 print(f"Compressing term: {term}, doc_id: {doc_id} (as list)")
-                                combined_bits.extend(int2ba(1, length=8)) #! use less bits for the block type indicator
-
+                                combined_bits.extend(int2ba(1, length=8)) 
                                 for item in doc_id:
                                     if isinstance(item, int):
                                         # print(f"Compressing term: {term}, doc_id: {doc_id}, item: {item} (as int)")
@@ -123,9 +121,9 @@ class IndexStorage:
                             combined_bits.extend(int2ba(doc_id, length=32))  # Convert integer to bitarray of fixed length
                         else:
                             # print(f"Compressing term: {term}, doc_id: {doc_id}")
-                            combined_bits.extend(doc_id) #! doesnt work with plain inegers
+                            combined_bits.extend(doc_id) 
                     
-                else: #! if we have term frequencies, we interleave doc_ids and tfs in the bitarray
+                else: 
                     for doc_id, tf in posting_list:
                         if isinstance(doc_id, int):
                             combined_bits.extend(int2ba(doc_id, length=32))
@@ -142,7 +140,7 @@ class IndexStorage:
 
                 f.write(struct.pack('<I', bit_length))
 
-                # 2. Let bitarray handle the byte conversion and file write directly
+                
                 combined_bits.tofile(f)
 
     def read_from_disk(self):
@@ -158,17 +156,13 @@ class IndexStorage:
             print(f"Loading index with compression code: {compression_code}, removed_tf_flag: {removed_tf_flag}, d_gap_index_flag: {d_gap_index_flag}")
             
             detected_method = COMPRESSION_METHODS_DEC[compression_code]
-            # self.index_obj.compression_method = COMPRESSION_METHODS[compression_code]
-            self.index_obj.compression_method = "None" #! bc at the end the index will have docids as integers
+            
+            self.index_obj.compression_method = "None" 
             self.index_obj.removed_tf = bool(removed_tf_flag)
             self.index_obj.d_gap_index_ = bool(d_gap_index_flag)
 
-            self.decompress_index_from_file(f, detected_method)  # Implement this method to parse and load the index data
+            self.decompress_index_from_file(f, detected_method) 
 
-            # self.raw_read(f)
-
-    def raw_read(self, f): #!doesnt decompress keeps the compressed bitarrays in memory
-        pass
     
     def decompress_index_from_file(self, index_data, decompression_method):
 
@@ -202,39 +196,37 @@ class IndexStorage:
                 break # Clean End of File reached
             
             print(f"Reading term of length {term_len} bytes: {term_bytes}")
-            term = term_bytes.decode('utf-8') #! important change to real terms from file
+            term = term_bytes.decode('utf-8') 
 
             size_bytes = index_data.read(4)
             if not size_bytes:
                 break # Clean End of File reached
                 
-            pl_size = struct.unpack('<I', size_bytes)[0] # [0] since unpack returns a tuple
+            pl_size = struct.unpack('<I', size_bytes)[0] 
             
             # print(f"Decompressing term: {moch_term}, Posting list size: {pl_size}, Reading: {index_data.tell()} bytes")
             self.index_obj.index[term] = []
 
             byte_length = (pl_size + 7) // 8
         
-            # 1. Read the bits directly out of the file stream using bitarray
+            
             bits = bitarray()
             bits.fromfile(index_data, byte_length)
-            
-            # 2. Slice off the trailing padding bits required by the filesystem
+
             bits = bits[:pl_size] 
 
             if decompression_method == "pfor_delta":
                 extra_decomp_function = decomp_methods_map[self.index_obj.compressor.pfor_delta_extra_strategy]
                 while len(bits) > 0:
 
-                    # block_type_indicator = index_data.read(1)
-                    # block_type_indicator = struct.unpack('<B', block_type_indicator)[0]  # Unpack the first bit to determine the block type
+                    
                     if len(bits) < 8:  # Safety check for trailing padding bits
                         break
                         
                     block_type_indicator = ba2int(bits[:8])  # Read the 8-bit indicator
                     # print(f"Block type indicator for term '{term}': {block_type_indicator}, Remaining bits: {len(bits)}")
                     del bits[:8]
-                    # del bits[0]  # Remove the block type indicator bit
+
 
                     if block_type_indicator == 1:  # Last block
                         # Handle the last block with the extra strategy
@@ -258,7 +250,7 @@ class IndexStorage:
                     
                     chunks = [block[i : i + k] for i in range(0, len(block), k)]
 
-                    outlier_count = 0 #!uselessuse len outlierpos
+                    outlier_count = 0
                     outlier_positions = []
                     outliers = []
                     for i, chunk in enumerate(chunks):
@@ -284,9 +276,8 @@ class IndexStorage:
                 for doc_id in decomp_func(bits):
                     self.index_obj.index[term].append(doc_id)
             else:
-                iterator = iter(decomp_func(bits)) #! maybe better to implement the decompression functions as generators that yield doc_id and tf pairs directly instead of returning a list, so we can avoid storing the whole decompressed posting list in memory at once
+                iterator = iter(decomp_func(bits)) 
 
-                # 2. Zip it with itself to group elements into pairs of 2
                 for doc_id, tf in zip(iterator, iterator):
                     self.index_obj.index[term].append((doc_id, tf))
                 

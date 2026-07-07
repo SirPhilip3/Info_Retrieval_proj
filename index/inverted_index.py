@@ -16,9 +16,6 @@ class Index:
 
         self.d_gap_index_ = False
 
-        # self.compression_function = None
-        # self.decompression_function = None
-
         self.compressor = IndexCompressor(index_obj=self)
         self.storage = IndexStorage(index_obj=self, file_path=None)
 
@@ -31,7 +28,6 @@ class Index:
 
     def simple_index(self, dataset, my_tokenizer, max_num_docs=1001):
         count_docs = 0      # number of docs
-        # count_tokens = 0    # number of tokens
         count_postings = 0  # number of postings
         docid = 0           # docid assigned sequentially during the parsing
 
@@ -56,12 +52,11 @@ class Index:
             tokens = my_tokenizer(doc.text)
 
             count_docs += 1
-            # count_tokens += len(tokens)
 
             for el in tokens:
                 if el in self.index:
                     last_docid, tf = self.index[el][-1]
-                    if docid != last_docid:       # check if doc_id was already appended, multiple
+                    if docid != last_docid:       # check if doc_id was already appended
                         self.index[el].append((docid,1))
                         count_postings += 1
                     else:
@@ -71,14 +66,12 @@ class Index:
                     count_postings += 1
                     
         self.num_docs = count_docs
-        # print("bef return")
-        # return self.index
+
 
     def d_gap_index(self, dataset, my_tokenizer, max_num_docs=1001):
 
         docid = 0           # docid assigned sequentially during the parsing
         count_docs = 0      # number of docs
-        # count_tokens = 0    # number of tokens
         count_postings = 0  # number of postings
         
         previous_docid = {}
@@ -104,7 +97,6 @@ class Index:
             tokens = my_tokenizer(doc.text)
 
             count_docs += 1
-            # count_tokens += len(tokens)
 
             for el in tokens:
 
@@ -127,7 +119,6 @@ class Index:
                     self.index[el] = [(docid, 1)]
                     count_postings += 1
 
-        # return self.index
     
     def remove_tf(self):
         """Remove term frequencies from the index, leaving only document IDs."""
@@ -139,8 +130,7 @@ class Index:
         
         self.removed_tf = True
         
-    def save_index(self, file_path): #! temporary just save the postings not the terms 
-
+    def save_index(self, file_path): 
         self.storage.set_file_path(file_path)
         self.storage.write_to_disk()
                 
@@ -171,7 +161,7 @@ class Index:
         if self.compression_method != "None":
             raise ValueError(f"Index is already compressed with method '{self.compression_method}'. Clear the index before applying new compression.")
 
-        methods_map = { #! better way to do this ? 
+        methods_map = { 
             "gamma": self.compressor.gamma_encode,
             "delta": self.compressor.delta_encode,
             "varbyte": self.compressor.varbyte_encode,
@@ -265,8 +255,7 @@ class Index:
 
     def get_inverse_document_frequency(self, term):
         df = len(self.get_posting_list(term))
-        # if df == 0: #! non necessario -> se metto un termine c'è almeno su un documento
-            # return 0
+
         assert df > 0, f"Document frequency for term '{term}' should be greater than 0."
         
         return np.log10(self.num_docs/df)
@@ -297,37 +286,34 @@ class Index:
                     
             elif self.compression_method == "pfor_delta":
                 for element in posting_list:
-                    # Case 1: Compressed PForDelta Block/Remainder Tuple
+    
                     if isinstance(element, tuple):
                         doc_id_s, outliers, min_val = element
                         
-                        # Count bits of the main packed bitarray
+                        
                         if hasattr(doc_id_s, 'len'):
                             doc_id_bits += doc_id_s.len()
                         
-                        # Count bits from the list of outlier bitarrays
+                        
                         if isinstance(outliers, list):
                             for outlier in outliers:
                                 if hasattr(outlier, 'len'):
                                     doc_id_bits += outlier.len()
                                 else:
-                                    # Fallback if outlier is represented as raw int
+                                    
                                     doc_id_bits += 32 
                         
-                        # Account for storing the frame of reference base / min value
-                        # Assuming standard 32-bit integer for the base value
                         doc_id_bits += 32
 
-                    # Case 2: Trailing raw standalone bitarray
                     elif hasattr(element, 'len'):
                         doc_id_bits += element.len()
 
-                    # Case 3: Fallback list of raw integers (not enough docIDs for a block)
+
                     elif isinstance(element, list):
-                        # Each raw integer takes 32 bits under standard compression rules
+                        
                         doc_id_bits += len(element) * 32
                         
-                    # Case 4: Single fallback raw integer (if any)
+                    
                     elif isinstance(element, int):
                         doc_id_bits += 32
             else:
@@ -367,7 +353,7 @@ class Index:
             if i == max_num_docs:
                 break
 
-            doc_id = i+1
+            doc_id = doc.doc_id
             doc_terms = tokenizer(doc.text)
             for term in doc_terms:
                 if term in term_index: #useless maybe
@@ -376,6 +362,6 @@ class Index:
                         doc_set[doc_id] = list()
                     doc_set[doc_id].append(term_id)
 
-        print(doc_set)
+        
         return doc_set
             
