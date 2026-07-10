@@ -39,7 +39,7 @@ def create_sparse_tf_idf_matrix(index, dtype=np.float32):
     return mat, doc_ids, terms
 
 
-def k_medoids(df, k, verbose = False): # TODO vary for k vs execution time!
+def k_medoids(df, k, verbose = False): 
 
     """ 
     input:
@@ -166,18 +166,18 @@ def calculate_distance_matrix(medoid_vectors, method="euclidean"):
         n = len(medoid_vectors)
         dist = np.zeros((n, n))
         
-        # Trasformiamo in set una volta sola prima dei cicli
+
         sets = [set(v) for v in medoid_vectors]
 
         for i in range(n):
-            for j in range(i + 1, n):  # Parte da i+1 per sfruttare la simmetria
+            for j in range(i + 1, n):  
                 intersection = len(sets[i].intersection(sets[j]))
                 union = len(sets[i].union(sets[j]))
                 
                 jaccard_dist = 1 - (intersection / union) if union > 0 else 1
                 
                 dist[i][j] = jaccard_dist
-                dist[j][i] = jaccard_dist  # Specchia il risultato
+                dist[j][i] = jaccard_dist  
                 
         return dist
     
@@ -205,84 +205,8 @@ def tsp_path(dist_matrix, verbose=False):
 
     return tsp_path
 
-# def stream_cluster(SortedCollection, Radius, k): 
-#     """
-#     Versione modificata per mantenere gli indici posizionali (0, 1, 2...) 
-#     compatibili con la matrice delle distanze e il codice TSP esistente.
-#     """
-#     C_ids = []               # Lista dei REALI doc_id dei medoidi (es: ['doc_42', 'doc_99'])
-#     medoid_sets = []         # Lista dei set di termini (l'indice corrisponde alla posizione nella matrice)
-    
-#     # I cluster ora usano come chiave l'INDICE POSIZIONALE (0, 1, 2...) e non il doc_id reale
-#     Clusters = defaultdict(list) 
 
-#     for doc_id, doc_terms in SortedCollection.items():
-#         set_d = set(doc_terms)
-        
-#         # Se non ci sono ancora medoidi, crea il primo (indice 0)
-#         if not C_ids:
-#             C_ids.append(doc_id)
-#             medoid_sets.append(set_d)
-#             Clusters[0].append(doc_id)
-#             continue
 
-#         # Calcola le distanze usando l'indice posizionale 'idx'
-#         distances = []
-#         for idx in range(len(C_ids)):
-#             centroid_set = medoid_sets[idx]
-#             intersection = len(centroid_set.intersection(set_d))
-#             union = len(centroid_set.union(set_d))
-#             jaccard_dist = 1 - (intersection / union) if union > 0 else 1
-#             distances.append(jaccard_dist)
-        
-#         # Trova il medoide più vicino (min_idx sarà 0, 1, 2...)
-#         min_idx = np.argmin(distances)
-#         dist_c = distances[min_idx]
-
-#         # Se è vicino OR abbiamo raggiunto il tetto massimo k
-#         if dist_c < Radius or len(C_ids) >= k:
-#             # Assegna al cluster usando l'indice posizionale
-#             Clusters[min_idx].append(doc_id)
-#         else:
-#             # Crea un nuovo medoide (il suo indice sarà il vecchio len(C_ids))
-#             new_idx = len(C_ids)
-#             C_ids.append(doc_id)
-#             medoid_sets.append(set_d)
-#             Clusters[new_idx].append(doc_id)
-            
-#     # Restituiamo medoid_sets (lista di set per la distanza) e C_ids come terzo parametro
-#     return medoid_sets, Clusters, C_ids
-    
-# def reorder_documents_by_tsp_stream_cluster(document_clusters, medoids, tsp_path):
-#     """
-#     Reorder documents by cluster order induced by TSP over medoids.
-#     Inside each cluster, keep documents in their original order (row order).
-
-#     Args:
-#         document_clusters: array-like of shape (n_docs,), cluster label per doc.
-#         medoids: list of medoid doc indices (not required for ordering here, kept for API compatibility).
-#         tsp_path: list of cluster ids in the order returned by TSP.
-
-#     Returns:
-#         ordered_doc_ids: list of document row indices in final order.
-#         cluster_to_docs: dict {cluster_id: [doc_ids in original order]}.
-#     """
-#     document_clusters = np.asarray(document_clusters)
-
-#     # Build cluster -> docs preserving natural/original order
-#     cluster_to_docs = {
-#         c: np.flatnonzero(document_clusters == c).tolist()
-#         for c in range(len(medoids))
-#     }
-
-#     # Concatenate clusters following TSP order
-#     ordered_doc_ids = []
-#     for c in tsp_path:
-#         ordered_doc_ids.extend(cluster_to_docs.get(c, []))
-
-#     return ordered_doc_ids, cluster_to_docs
-
-# better 
 def reorder_documents_by_tsp(tsp_path, cluster, C):
     tot = []
     for i in tsp_path:
