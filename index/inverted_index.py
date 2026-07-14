@@ -1,3 +1,5 @@
+import math
+
 from index._compression import IndexCompressor
 from index._storage import IndexStorage
 
@@ -365,3 +367,36 @@ class Index:
         
         return doc_set
             
+    
+    def average_gap_bit_width(self):
+        total_bits = 0
+        total_gaps = 0
+
+        for posting_list in self.index.values():
+            if not posting_list:
+                continue
+
+            if self.d_gap_index_:
+                if self.removed_tf:
+                    gaps = posting_list
+                else:
+                    gaps = [gap for gap, _tf in posting_list]
+
+                for gap in gaps:
+                    if gap < 1:
+                        raise ValueError("D-gaps must be positive.")
+                    total_bits += 1 + math.floor(math.log2(gap))
+                    total_gaps += 1
+            else:
+                previous_doc_id = None
+                for posting in posting_list:
+                    doc_id = posting if self.removed_tf else posting[0]
+                    if previous_doc_id is not None:
+                        gap = doc_id - previous_doc_id
+                        if gap < 1:
+                            raise ValueError("Posting lists must be sorted by increasing doc_id.")
+                        total_bits += 1 + math.floor(math.log2(gap))
+                        total_gaps += 1
+                    previous_doc_id = doc_id
+
+        return 0 if total_gaps == 0 else total_bits / total_gaps
