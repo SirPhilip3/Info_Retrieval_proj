@@ -382,10 +382,11 @@ class Index:
                 else:
                     gaps = [gap for gap, _tf in posting_list]
 
-                for gap in gaps:
+                for gap in gaps[1:]:
                     if gap < 1:
                         raise ValueError("D-gaps must be positive.")
-                    total_bits += 1 + math.floor(math.log2(gap))
+                    #total_bits += 1 + math.floor(math.log2(gap))
+                    total_bits += gap.bit_length()  
                     total_gaps += 1
             else:
                 previous_doc_id = None
@@ -395,7 +396,8 @@ class Index:
                         gap = doc_id - previous_doc_id
                         if gap < 1:
                             raise ValueError("Posting lists must be sorted by increasing doc_id.")
-                        total_bits += 1 + math.floor(math.log2(gap))
+                        #total_bits += 1 + math.floor(math.log2(gap))
+                        total_bits += gap.bit_length()
                         total_gaps += 1
                     previous_doc_id = doc_id
 
